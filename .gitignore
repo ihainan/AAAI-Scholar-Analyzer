@@ -1,0 +1,16 @@
+# Ignore everything
+*
+
+# But not these directories
+!agent_scripts/
+!agent_scripts/**
+!.claude/
+!.claude/**
+
+# And not gitignore itself
+!.gitignore
+
+# Always ignore pycache
+__pycache__/
+**/__pycache__/
+*.pyc

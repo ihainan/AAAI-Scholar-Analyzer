@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__firecrawl__firecrawl_map",
+      "mcp__firecrawl__firecrawl_scrape",
+      "Bash(python3:*)",
+      "Skill(verify-crawl)",
+      "Skill(aminer)",
+      "WebFetch(domain:aaai.org)",
+      "Bash(python:*)",
+      "WebSearch",
+      "WebFetch(domain:scholar.google.com)",
+      "WebFetch(domain:www.linkedin.com)",
+      "WebFetch(domain:www.aminer.cn)",
+      "Bash(export:*)"
+    ]
+  }
+}
