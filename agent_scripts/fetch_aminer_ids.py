@@ -81,6 +81,7 @@ async def fetch_aminer_id_for_scholar(scholar: dict, project_root: Path) -> dict
 4. 如果你不能有 90% 以上的信心确定学者信息的准确性，请直接按照失败处理。"""
 
     options = ClaudeAgentOptions(
+        # model="claude-sonnet-4-5-20250929",
         cwd=str(project_root),
         setting_sources=["project"],
         allowed_tools=["Skill", "Bash", "WebSearch", "WebFetch", "Read"],
@@ -226,9 +227,13 @@ async def process_scholars(json_file_path: Path) -> None:
     for idx, scholar in enumerate(talents, 1):
         name = scholar.get("name", "Unknown")
 
-        # Check if already has aminer_id
+        # Check if already has aminer_id (either success or failed)
         if "aminer_id" in scholar:
-            print(f"[{idx}/{total_count}] Skipping {name} (already has aminer_id: {scholar['aminer_id']})")
+            aminer_id = scholar["aminer_id"]
+            if aminer_id == "failed":
+                print(f"[{idx}/{total_count}] Skipping {name} (previously failed)")
+            else:
+                print(f"[{idx}/{total_count}] Skipping {name} (already has aminer_id: {aminer_id})")
             skipped += 1
             continue
 
@@ -250,10 +255,16 @@ async def process_scholars(json_file_path: Path) -> None:
                 print(f"  Updated JSON file")
             else:
                 print(f"  FAILED: No AMiner ID in response")
+                scholar["aminer_id"] = "failed"
+                save_json_file(json_file_path, data)
+                print(f"  Marked as failed in JSON file")
                 failed += 1
         else:
             error_msg = result.get("error", "Unknown error") if result else "No response"
             print(f"  FAILED: {error_msg}")
+            scholar["aminer_id"] = "failed"
+            save_json_file(json_file_path, data)
+            print(f"  Marked as failed in JSON file")
             failed += 1
 
         processed += 1
