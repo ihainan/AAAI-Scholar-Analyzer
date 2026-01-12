@@ -1,0 +1,67 @@
+.conference-card {
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  overflow: hidden;
+  text-decoration: none;
+  color: inherit;
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.conference-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.conference-card-image {
+  height: 140px;
+  background: #f5f5f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.conference-card-image img {
+  max-width: 80%;
+  max-height: 80%;
+  object-fit: contain;
+}
+
+.conference-card-placeholder {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #666;
+}
+
+.conference-card-content {
+  padding: 16px;
+}
+
+.conference-card-title {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.conference-card-name {
+  margin: 0 0 8px;
+  font-size: 0.875rem;
+  color: #666;
+  line-height: 1.4;
+}
+
+.conference-card-location {
+  margin: 0 0 4px;
+  font-size: 0.875rem;
+  color: #444;
+}
+
+.conference-card-dates {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #666;
+}

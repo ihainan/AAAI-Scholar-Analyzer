@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      - DATA_DIR=/app/data
+      - AVATAR_CACHE_DIR=/app/avatar_cache
+    volumes:
+      - ../../data:/app/data:ro
+      - avatar_cache:/app/avatar_cache
+    expose:
+      - "37801"
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: ..
+      dockerfile: docker/nginx/Dockerfile
+    ports:
+      - "37802:37802"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  avatar_cache:

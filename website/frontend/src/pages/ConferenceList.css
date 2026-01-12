@@ -1,0 +1,55 @@
+.conference-list-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+
+.page-header {
+  margin-bottom: 40px;
+  text-align: center;
+}
+
+.page-header h1 {
+  margin: 0 0 8px;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.page-header p {
+  margin: 0;
+  font-size: 1rem;
+  color: #666;
+}
+
+.year-section {
+  margin-bottom: 48px;
+}
+
+.year-heading {
+  margin: 0 0 20px;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  padding-bottom: 8px;
+  border-bottom: 2px solid #e0e0e0;
+}
+
+.conference-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 24px;
+}
+
+.loading,
+.error,
+.empty-state {
+  text-align: center;
+  padding: 60px 24px;
+  color: #666;
+  font-size: 1rem;
+}
+
+.error {
+  color: #dc2626;
+}

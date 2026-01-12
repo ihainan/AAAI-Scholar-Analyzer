@@ -6,6 +6,8 @@
 !agent_scripts/**
 !.claude/
 !.claude/**
+!website/
+!website/**
 
 # And not gitignore itself
 !.gitignore
@@ -14,3 +16,10 @@
 __pycache__/
 **/__pycache__/
 *.pyc
+
+# Website specific ignores
+website/backend/.venv/
+website/backend/avatar_cache/
+website/backend/uv.lock
+website/frontend/node_modules/
+website/frontend/dist/
