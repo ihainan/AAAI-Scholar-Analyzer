@@ -7,6 +7,8 @@ description: Query academic information from AMiner, including organization sear
 
 This skill provides access to AMiner's academic database APIs for querying information about research organizations and scholars.
 
+**IMPORTANT: All commands MUST be executed with `python` prefix. Do NOT run the script directly without `python`.**
+
 ## Prerequisites
 
 The `AMINER_API_KEY` environment variable must be set with a valid AMiner API key.
