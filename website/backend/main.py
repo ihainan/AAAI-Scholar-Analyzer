@@ -239,6 +239,7 @@ class ScholarDetail(BaseModel):
     email: Optional[str] = None
     orcid: Optional[str] = None
     semantic_scholar: Optional[str] = None
+    additional_info: Optional[str] = None
 
 
 class HealthResponse(BaseModel):
@@ -427,6 +428,7 @@ def build_scholar_detail(talent: dict, aminer_id: Optional[str]) -> ScholarDetai
                 detail.email = enriched_data.get("email")
                 detail.orcid = enriched_data.get("orcid")
                 detail.semantic_scholar = enriched_data.get("semantic_scholar")
+                detail.additional_info = enriched_data.get("additional_info")
             except Exception as e:
                 print(f"Error loading enriched data for {aminer_id}: {e}")
 

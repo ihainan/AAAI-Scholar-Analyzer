@@ -81,4 +81,5 @@ export interface ScholarDetail {
   email?: string;
   orcid?: string;
   semantic_scholar?: string;
+  additional_info?: string;
 }

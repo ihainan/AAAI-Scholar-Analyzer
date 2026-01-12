@@ -18,6 +18,14 @@ function cleanBio(bio: string): string {
   return bio.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
 }
 
+function parseEducation(edu: string): string[] {
+  // Split by <br> tags and filter out empty entries
+  return edu
+    .split(/<br\s*\/?>/gi)
+    .map(entry => entry.replace(/<[^>]*>/g, '').trim())
+    .filter(entry => entry.length > 0);
+}
+
 export default function ScholarDetail() {
   const { conferenceId } = useParams<{ conferenceId: string }>();
   const [searchParams] = useSearchParams();
@@ -188,10 +196,21 @@ export default function ScholarDetail() {
             </section>
           )}
 
+          {scholar.additional_info && (
+            <section className="section">
+              <h2>Additional Information</h2>
+              <p className="bio">{scholar.additional_info}</p>
+            </section>
+          )}
+
           {scholar.education && (
             <section className="section">
               <h2>Education</h2>
-              <p className="education">{cleanBio(scholar.education)}</p>
+              <ul className="education-list">
+                {parseEducation(scholar.education).map((entry, index) => (
+                  <li key={index}>{entry}</li>
+                ))}
+              </ul>
             </section>
           )}
 
