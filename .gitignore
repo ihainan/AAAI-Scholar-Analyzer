@@ -8,6 +8,8 @@
 !.claude/**
 !website/
 !website/**
+!config/
+!config/labels.json
 
 # And not gitignore itself
 !.gitignore
