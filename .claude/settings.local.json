@@ -12,7 +12,8 @@
       "WebFetch(domain:scholar.google.com)",
       "WebFetch(domain:www.linkedin.com)",
       "WebFetch(domain:www.aminer.cn)",
-      "Bash(export:*)"
+      "Bash(export:*)",
+      "Bash(npm create:*)"
     ]
   }
 }
