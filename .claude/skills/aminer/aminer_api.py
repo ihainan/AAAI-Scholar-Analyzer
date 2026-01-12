@@ -237,6 +237,22 @@ def get_person_figure(person_id: str) -> dict:
     return make_get_request("/person/figure", {"id": person_id})
 
 
+def get_person_all_papers(person_id: str) -> dict:
+    """
+    Get all papers authored by a scholar without pagination.
+
+    This function returns all papers at once, unlike get_person_papers
+    which applies client-side pagination.
+
+    Args:
+        person_id: The scholar's ID.
+
+    Returns:
+        API response with complete paper list.
+    """
+    return make_get_request("/person/paper/relation", {"id": person_id})
+
+
 def get_person_patents(person_id: str) -> dict:
     """
     Get patents associated with a scholar.
