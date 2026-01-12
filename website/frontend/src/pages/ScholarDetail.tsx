@@ -160,7 +160,7 @@ export default function ScholarDetail() {
             {scholar.labels && scholar.labels.results.length > 0 && (
               <div className="scholar-labels">
                 {scholar.labels.results
-                  .filter(label => label.value === true && label.confidence === 'high')
+                  .filter(label => label.value === true && (label.confidence === 'high' || label.confidence === 'medium'))
                   .map((label, index) => (
                     <span key={index} className="scholar-label-wrapper">
                       <span className="scholar-label">

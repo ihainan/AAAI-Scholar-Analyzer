@@ -610,14 +610,14 @@ def filter_scholars_by_labels(
             labels_data = enriched_data.get("labels", {})
             results = labels_data.get("results", [])
 
-            # Check if all filter conditions are met with high confidence
+            # Check if all filter conditions are met with medium or high confidence
             all_match = True
             for label_name, expected_value in label_filters.items():
                 found_match = False
                 for result in results:
                     if result.get("name") == label_name:
                         if (result.get("value") == expected_value and
-                            result.get("confidence") == "high"):
+                            result.get("confidence") in ("high", "medium")):
                             found_match = True
                         break
                 if not found_match:
