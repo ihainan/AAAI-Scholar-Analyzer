@@ -157,6 +157,24 @@ export default function ScholarDetail() {
         <main className="scholar-main">
           <header className="scholar-header">
             <h1>{scholar.name}</h1>
+            {scholar.labels && scholar.labels.results.length > 0 && (
+              <div className="scholar-labels">
+                {scholar.labels.results
+                  .filter(label => label.value === true && label.confidence === 'high')
+                  .map((label, index) => (
+                    <span key={index} className="scholar-label-wrapper">
+                      <span className="scholar-label">
+                        {label.name}
+                      </span>
+                      {label.reason && (
+                        <span className="scholar-label-tooltip">
+                          {label.reason}
+                        </span>
+                      )}
+                    </span>
+                  ))}
+              </div>
+            )}
             {scholar.aliases && scholar.aliases.length > 0 && (
               <p className="aliases">Also known as: {scholar.aliases.join(', ')}</p>
             )}

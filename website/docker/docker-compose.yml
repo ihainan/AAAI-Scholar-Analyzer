@@ -5,9 +5,11 @@ services:
       dockerfile: docker/backend.Dockerfile
     environment:
       - DATA_DIR=/app/data
+      - CONFIG_DIR=/app/config
       - AVATAR_CACHE_DIR=/app/avatar_cache
     volumes:
       - ../../data:/app/data:ro
+      - ../../config:/app/config:ro
       - avatar_cache:/app/avatar_cache
     expose:
       - "37801"

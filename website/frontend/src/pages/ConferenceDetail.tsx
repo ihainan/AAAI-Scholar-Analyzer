@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { getConferences, getConferenceScholars } from '../api';
+import { useParams, Link, useSearchParams } from 'react-router-dom';
+import { getConferences, getConferenceScholars, getLabelsConfig, filterScholarsByLabels } from '../api';
 import ScholarCard from '../components/ScholarCard';
-import type { Conference, ScholarBasic } from '../types';
+import type { Conference, ScholarBasic, LabelDefinition } from '../types';
 import './ConferenceDetail.css';
 
 function formatDateRange(dates?: { start?: string; end?: string }): string {
@@ -28,21 +28,96 @@ function formatLocation(location?: { venue?: string; city?: string; country?: st
   return parts.join(', ');
 }
 
+type FilterValue = 'any' | 'true' | 'false';
+
+function parseFiltersFromUrl(searchParams: URLSearchParams): Record<string, FilterValue> {
+  const filters: Record<string, FilterValue> = {};
+  const labelsParam = searchParams.get('labels');
+  if (labelsParam) {
+    labelsParam.split(',').forEach(item => {
+      const [name, value] = item.split(':');
+      if (name && (value === 'true' || value === 'false')) {
+        filters[name] = value as FilterValue;
+      }
+    });
+  }
+  return filters;
+}
+
+function filtersToUrlParam(filters: Record<string, FilterValue>): string {
+  const parts = Object.entries(filters)
+    .filter(([, value]) => value !== 'any')
+    .map(([name, value]) => `${name}:${value}`);
+  return parts.join(',');
+}
+
+function hasActiveFilters(filters: Record<string, FilterValue>): boolean {
+  return Object.values(filters).some(v => v !== 'any');
+}
+
 export default function ConferenceDetail() {
   const { conferenceId } = useParams<{ conferenceId: string }>();
+  const [, setSearchParams] = useSearchParams();
   const [conference, setConference] = useState<Conference | null>(null);
   const [scholars, setScholars] = useState<ScholarBasic[]>([]);
+  const [filteredScholars, setFilteredScholars] = useState<ScholarBasic[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filterLoading, setFilterLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [labelDefinitions, setLabelDefinitions] = useState<LabelDefinition[]>([]);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [filters, setFilters] = useState<Record<string, FilterValue>>({});
+  const [tempFilters, setTempFilters] = useState<Record<string, FilterValue>>({});
 
+  const applyFilters = async (newFilters: Record<string, FilterValue>, allScholars: ScholarBasic[]) => {
+    if (!conferenceId) return;
+
+    // Update URL (use replace to avoid adding to history for filter changes)
+    const urlParam = filtersToUrlParam(newFilters);
+    if (urlParam) {
+      setSearchParams({ labels: urlParam }, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
+
+    setFilters(newFilters);
+
+    // If no active filters, show all scholars
+    if (!hasActiveFilters(newFilters)) {
+      setFilteredScholars(allScholars);
+      return;
+    }
+
+    // Convert filters to API format
+    const apiFilters: Record<string, boolean> = {};
+    Object.entries(newFilters).forEach(([name, value]) => {
+      if (value === 'true') apiFilters[name] = true;
+      else if (value === 'false') apiFilters[name] = false;
+    });
+
+    setFilterLoading(true);
+    try {
+      const filtered = await filterScholarsByLabels(conferenceId, apiFilters);
+      setFilteredScholars(filtered);
+    } catch (err) {
+      console.error('Error filtering scholars:', err);
+      setFilteredScholars(allScholars);
+    } finally {
+      setFilterLoading(false);
+    }
+  };
+
+  // Initial data load - only depends on conferenceId
   useEffect(() => {
     async function fetchData() {
       if (!conferenceId) return;
 
+      setLoading(true);
       try {
-        const [conferencesData, scholarsData] = await Promise.all([
+        const [conferencesData, scholarsData, labelsData] = await Promise.all([
           getConferences(),
           getConferenceScholars(conferenceId),
+          getLabelsConfig().catch(() => ({ version: '1.0', labels: [] })),
         ]);
 
         const conf = conferencesData.find(c => c.id === conferenceId);
@@ -52,6 +127,27 @@ export default function ConferenceDetail() {
 
         setConference(conf);
         setScholars(scholarsData);
+        setLabelDefinitions(labelsData.labels);
+
+        // Initialize filters with label names
+        const initialFilters: Record<string, FilterValue> = {};
+        labelsData.labels.forEach(label => {
+          initialFilters[label.name] = 'any';
+        });
+
+        // Apply URL filters (read current searchParams)
+        const currentSearchParams = new URLSearchParams(window.location.search);
+        const urlFilters = parseFiltersFromUrl(currentSearchParams);
+        Object.entries(urlFilters).forEach(([name, value]) => {
+          if (name in initialFilters) {
+            initialFilters[name] = value;
+          }
+        });
+
+        setTempFilters(initialFilters);
+
+        // Apply initial filters with the freshly loaded scholars
+        await applyFilters(initialFilters, scholarsData);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data');
       } finally {
@@ -60,7 +156,26 @@ export default function ConferenceDetail() {
     }
 
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conferenceId]);
+
+  const openFilterModal = () => {
+    setTempFilters({ ...filters });
+    setShowFilterModal(true);
+  };
+
+  const handleApplyFilter = () => {
+    applyFilters(tempFilters, scholars);
+    setShowFilterModal(false);
+  };
+
+  const handleResetFilter = () => {
+    const resetFilters: Record<string, FilterValue> = {};
+    labelDefinitions.forEach(label => {
+      resetFilters[label.name] = 'any';
+    });
+    setTempFilters(resetFilters);
+  };
 
   if (loading) {
     return (
@@ -130,20 +245,87 @@ export default function ConferenceDetail() {
       </header>
 
       <section className="scholars-section">
-        <h2>Conference Participants ({scholars.length})</h2>
-        <div className="scholars-grid">
-          {scholars.map((scholar, index) => (
-            <ScholarCard
-              key={scholar.aminer_id || `${scholar.name}-${index}`}
-              scholar={scholar}
-              conferenceId={conferenceId!}
-            />
-          ))}
+        <div className="scholars-header">
+          <h2>Conference Participants ({filteredScholars.length}{hasActiveFilters(filters) ? ` / ${scholars.length}` : ''})</h2>
+          <button
+            className={`filter-button ${hasActiveFilters(filters) ? 'active' : ''}`}
+            onClick={openFilterModal}
+            title="Filter participants"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+            </svg>
+            Filter
+          </button>
         </div>
-        {scholars.length === 0 && (
-          <div className="empty-state">No participants found.</div>
+        {filterLoading ? (
+          <div className="loading">Filtering...</div>
+        ) : (
+          <>
+            <div className="scholars-grid">
+              {filteredScholars.map((scholar, index) => (
+                <ScholarCard
+                  key={scholar.aminer_id || `${scholar.name}-${index}`}
+                  scholar={scholar}
+                  conferenceId={conferenceId!}
+                />
+              ))}
+            </div>
+            {filteredScholars.length === 0 && (
+              <div className="empty-state">
+                {hasActiveFilters(filters)
+                  ? 'No participants match the current filters.'
+                  : 'No participants found.'}
+              </div>
+            )}
+          </>
         )}
       </section>
+
+      {showFilterModal && (
+        <div className="modal-overlay" onClick={() => setShowFilterModal(false)}>
+          <div className="filter-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Filter Participants</h3>
+              <button className="modal-close" onClick={() => setShowFilterModal(false)}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <div className="modal-body">
+              {labelDefinitions.map(label => (
+                <div key={label.name} className="filter-row">
+                  <label className="filter-label" title={label.description}>
+                    {label.name}
+                  </label>
+                  <select
+                    className="filter-select"
+                    value={tempFilters[label.name] || 'any'}
+                    onChange={e => setTempFilters(prev => ({
+                      ...prev,
+                      [label.name]: e.target.value as FilterValue
+                    }))}
+                  >
+                    <option value="any">Any</option>
+                    <option value="true">True</option>
+                    <option value="false">False</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={handleResetFilter}>
+                Reset
+              </button>
+              <button className="btn-primary" onClick={handleApplyFilter}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

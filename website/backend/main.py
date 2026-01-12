@@ -39,6 +39,10 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).parent.parent.parent /
 AMINER_SCHOLARS_DIR = DATA_DIR / "aminer" / "scholars"
 ENRICHED_SCHOLARS_DIR = DATA_DIR / "enriched" / "scholars"
 
+# Config directory path
+CONFIG_DIR = Path(os.environ.get("CONFIG_DIR", Path(__file__).parent.parent.parent / "config"))
+LABELS_CONFIG_PATH = CONFIG_DIR / "labels.json"
+
 # Avatar cache directory (writable, separate from read-only data)
 AVATAR_CACHE_DIR = Path(os.environ.get("AVATAR_CACHE_DIR", Path(__file__).parent / "avatar_cache"))
 AVATAR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -209,6 +213,29 @@ class AminerValidation(BaseModel):
     reason: Optional[str] = None
 
 
+# Labels related models
+class LabelResult(BaseModel):
+    name: str
+    value: Optional[bool] = None
+    confidence: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class ScholarLabels(BaseModel):
+    last_updated: Optional[str] = None
+    results: list[LabelResult] = []
+
+
+class LabelDefinition(BaseModel):
+    name: str
+    description: str
+
+
+class LabelsConfig(BaseModel):
+    version: str
+    labels: list[LabelDefinition]
+
+
 class ScholarDetail(BaseModel):
     # Basic info from scholars.json
     name: str
@@ -240,6 +267,9 @@ class ScholarDetail(BaseModel):
     orcid: Optional[str] = None
     semantic_scholar: Optional[str] = None
     additional_info: Optional[str] = None
+
+    # Labels
+    labels: Optional[ScholarLabels] = None
 
 
 class HealthResponse(BaseModel):
@@ -429,6 +459,14 @@ def build_scholar_detail(talent: dict, aminer_id: Optional[str]) -> ScholarDetai
                 detail.orcid = enriched_data.get("orcid")
                 detail.semantic_scholar = enriched_data.get("semantic_scholar")
                 detail.additional_info = enriched_data.get("additional_info")
+
+                # Load labels if available
+                if enriched_data.get("labels"):
+                    labels_data = enriched_data["labels"]
+                    detail.labels = ScholarLabels(
+                        last_updated=labels_data.get("last_updated"),
+                        results=[LabelResult(**r) for r in labels_data.get("results", [])]
+                    )
             except Exception as e:
                 print(f"Error loading enriched data for {aminer_id}: {e}")
 
@@ -485,6 +523,121 @@ async def get_avatar(aminer_id: str):
     except httpx.RequestError as e:
         mark_avatar_fetch_failed(photo_url)
         raise HTTPException(status_code=502, detail=f"Failed to fetch avatar: {str(e)}")
+
+
+@app.get("/api/labels", response_model=LabelsConfig)
+def get_labels_config():
+    """
+    Get labels configuration.
+    Returns all available label definitions from config/labels.json.
+    """
+    if not LABELS_CONFIG_PATH.exists():
+        raise HTTPException(status_code=404, detail="Labels configuration not found")
+
+    try:
+        labels_data = load_json_file(str(LABELS_CONFIG_PATH))
+        return LabelsConfig(**labels_data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading labels config: {e}")
+
+
+@app.get("/api/conferences/{conference_id}/scholars/filter", response_model=list[ScholarBasic])
+def filter_scholars_by_labels(
+    conference_id: str,
+    labels: Optional[str] = Query(None, description="Label filters in format 'name:value,name:value' (e.g., 'Chinese:true,Student:false')"),
+):
+    """
+    Filter scholars by label values.
+    Only returns scholars where labels match with high confidence.
+    """
+    conference_dir = DATA_DIR / conference_id
+    scholars_path = conference_dir / "scholars.json"
+
+    if not conference_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Conference not found: {conference_id}")
+
+    if not scholars_path.exists():
+        raise HTTPException(status_code=404, detail=f"Scholars data not found for conference: {conference_id}")
+
+    try:
+        scholars_data = load_json_file(str(scholars_path))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading scholars data: {e}")
+
+    talents = scholars_data.get("talents", [])
+
+    # Parse label filters
+    label_filters: dict[str, bool] = {}
+    if labels:
+        for filter_item in labels.split(","):
+            if ":" in filter_item:
+                name, value = filter_item.split(":", 1)
+                name = name.strip()
+                value = value.strip().lower()
+                if value in ("true", "false"):
+                    label_filters[name] = value == "true"
+
+    # If no filters, return all scholars
+    if not label_filters:
+        scholars = []
+        for talent in talents:
+            aminer_id = talent.get("aminer_id")
+            photo_url = get_scholar_photo(aminer_id)
+            scholars.append(ScholarBasic(
+                name=talent.get("name", "Unknown"),
+                affiliation=talent.get("affiliation"),
+                roles=talent.get("roles", []),
+                aminer_id=aminer_id,
+                photo_url=photo_url,
+                description=talent.get("description"),
+            ))
+        return scholars
+
+    # Filter scholars by labels
+    filtered_scholars = []
+    for talent in talents:
+        aminer_id = talent.get("aminer_id")
+        if not aminer_id:
+            continue
+
+        # Load enriched data to check labels
+        enriched_path = ENRICHED_SCHOLARS_DIR / f"{aminer_id}.json"
+        if not enriched_path.exists():
+            continue
+
+        try:
+            enriched_data = load_json_file(str(enriched_path))
+            labels_data = enriched_data.get("labels", {})
+            results = labels_data.get("results", [])
+
+            # Check if all filter conditions are met with high confidence
+            all_match = True
+            for label_name, expected_value in label_filters.items():
+                found_match = False
+                for result in results:
+                    if result.get("name") == label_name:
+                        if (result.get("value") == expected_value and
+                            result.get("confidence") == "high"):
+                            found_match = True
+                        break
+                if not found_match:
+                    all_match = False
+                    break
+
+            if all_match:
+                photo_url = get_scholar_photo(aminer_id)
+                filtered_scholars.append(ScholarBasic(
+                    name=talent.get("name", "Unknown"),
+                    affiliation=talent.get("affiliation"),
+                    roles=talent.get("roles", []),
+                    aminer_id=aminer_id,
+                    photo_url=photo_url,
+                    description=talent.get("description"),
+                ))
+        except Exception:
+            continue
+
+    return filtered_scholars
 
 
 @app.post("/api/cache/clear")

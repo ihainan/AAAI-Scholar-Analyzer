@@ -56,6 +56,28 @@ export interface ResearchInterest {
   order?: number;
 }
 
+export interface LabelResult {
+  name: string;
+  value?: boolean | null;
+  confidence?: string;
+  reason?: string;
+}
+
+export interface ScholarLabels {
+  last_updated?: string;
+  results: LabelResult[];
+}
+
+export interface LabelDefinition {
+  name: string;
+  description: string;
+}
+
+export interface LabelsConfig {
+  version: string;
+  labels: LabelDefinition[];
+}
+
 export interface ScholarDetail {
   name: string;
   aliases?: string[];
@@ -82,4 +104,5 @@ export interface ScholarDetail {
   orcid?: string;
   semantic_scholar?: string;
   additional_info?: string;
+  labels?: ScholarLabels;
 }

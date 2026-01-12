@@ -1,4 +1,4 @@
-import type { Conference, ScholarBasic, ScholarDetail } from '../types';
+import type { Conference, ScholarBasic, ScholarDetail, LabelsConfig } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
   ? import.meta.env.VITE_API_BASE_URL
@@ -45,5 +45,27 @@ export async function searchScholar(
 
   return fetchApi<ScholarDetail[]>(
     `/api/conferences/${conferenceId}/scholars/search?${searchParams.toString()}`
+  );
+}
+
+export async function getLabelsConfig(): Promise<LabelsConfig> {
+  return fetchApi<LabelsConfig>('/api/labels');
+}
+
+export async function filterScholarsByLabels(
+  conferenceId: string,
+  labelFilters: Record<string, boolean>
+): Promise<ScholarBasic[]> {
+  const filterParts = Object.entries(labelFilters)
+    .map(([name, value]) => `${name}:${value}`)
+    .join(',');
+
+  const searchParams = new URLSearchParams();
+  if (filterParts) {
+    searchParams.set('labels', filterParts);
+  }
+
+  return fetchApi<ScholarBasic[]>(
+    `/api/conferences/${conferenceId}/scholars/filter?${searchParams.toString()}`
   );
 }
