@@ -1,5 +1,6 @@
 services:
   backend:
+    container_name: scholar-backend
     build:
       context: ..
       dockerfile: docker/backend.Dockerfile
@@ -16,6 +17,7 @@ services:
     restart: unless-stopped
 
   nginx:
+    container_name: scholar-nginx
     build:
       context: ..
       dockerfile: docker/nginx/Dockerfile
