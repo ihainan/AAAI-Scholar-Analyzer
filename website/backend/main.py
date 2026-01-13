@@ -11,17 +11,26 @@ Provides endpoints for:
 import hashlib
 import json
 import os
+import uuid
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
+import logging
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Conference API", version="0.1.0")
 
@@ -46,6 +55,13 @@ LABELS_CONFIG_PATH = CONFIG_DIR / "labels.json"
 # Avatar cache directory (writable, separate from read-only data)
 AVATAR_CACHE_DIR = Path(os.environ.get("AVATAR_CACHE_DIR", Path(__file__).parent / "avatar_cache"))
 AVATAR_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# AMiner Web API cache directory (for scholar detail from web API)
+AMINER_WEB_API_CACHE_DIR = Path(os.environ.get("AMINER_WEB_API_CACHE_DIR", Path(__file__).parent / "aminer_web_api_cache"))
+AMINER_WEB_API_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# AMiner Web API cache TTL (15 days in seconds)
+AMINER_WEB_API_CACHE_TTL = 15 * 24 * 60 * 60
 
 # HTTP client for fetching remote avatars (shorter timeout to avoid slow responses)
 http_client = httpx.AsyncClient(timeout=5.0, follow_redirects=True)
@@ -659,6 +675,340 @@ def clear_avatar_cache():
     return {"status": "avatar cache cleared", "files_deleted": count}
 
 
+# ============== AMiner Web API Integration ==============
+
+def get_aminer_web_api_cache_path(scholar_id: str) -> Path:
+    """Get cache file path for AMiner web API response."""
+    return AMINER_WEB_API_CACHE_DIR / f"{scholar_id}.json"
+
+
+def is_aminer_cache_valid(cache_path: Path) -> bool:
+    """Check if AMiner cache file is still valid (within 15 days)."""
+    if not cache_path.exists():
+        return False
+
+    cache_age = datetime.now().timestamp() - cache_path.stat().st_mtime
+    return cache_age < AMINER_WEB_API_CACHE_TTL
+
+
+async def fetch_aminer_web_api(
+    scholar_id: str,
+    authorization: str,
+    x_signature: str,
+    x_timestamp: str
+) -> dict:
+    """
+    Fetch scholar data from AMiner web API.
+
+    Args:
+        scholar_id: AMiner scholar ID
+        authorization: Authorization token from header
+        x_signature: X-Signature from header
+        x_timestamp: X-Timestamp from header
+
+    Returns:
+        Raw API response from AMiner web API
+    """
+    url = "https://apiv2.aminer.cn/magic?a=getPerson__personapi.get___"
+
+    headers = {
+        "Accept": "application/json, text/plain, */*",
+        "Authorization": authorization,
+        "Content-Type": "application/json",
+        "X-Signature": x_signature,
+        "X-Timestamp": x_timestamp,
+    }
+
+    payload = [{
+        "action": "personapi.get",
+        "parameters": {"ids": [scholar_id]},
+        "schema": {
+            "person": [
+                "id", "name", "name_zh", "avatar", "num_view", "is_follow",
+                "work", "work_zh", "hide", "nation", "language", "bind",
+                "acm_citations", "links", "educations", "tags", "tags_zh",
+                "num_view", "num_follow", "is_upvoted", "num_upvoted",
+                "is_downvoted", "is_lock",
+                {"indices": ["hindex", "gindex", "pubs", "citations", "newStar", "risingStar", "activity", "diversity", "sociability"]},
+                {"profile": ["position", "position_zh", "affiliation", "affiliation_zh", "work", "work_zh", "gender", "lang", "homepage", "phone", "email", "fax", "bio", "bio_zh", "edu", "edu_zh", "address", "note", "homepage", "title", "titles"]}
+            ]
+        }
+    }]
+
+    logger.info(f"[AMiner API] Fetching scholar data for ID: {scholar_id}")
+    logger.debug(f"[AMiner API] Request URL: {url}")
+    logger.debug(f"[AMiner API] Request payload: {json.dumps(payload, ensure_ascii=False)}")
+
+    try:
+        response = await http_client.post(url, json=payload, headers=headers, timeout=30.0)
+        response.raise_for_status()
+
+        result = response.json()
+        logger.info(f"[AMiner API] Successfully fetched data for scholar {scholar_id}")
+        logger.debug(f"[AMiner API] Full response: {json.dumps(result, ensure_ascii=False, indent=2)}")
+
+        return result
+    except httpx.HTTPError as e:
+        logger.error(f"[AMiner API] Failed to fetch scholar {scholar_id}: {str(e)}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch from AMiner API: {str(e)}")
+
+
+def convert_web_api_to_official_format(web_response: dict) -> dict:
+    """
+    Convert AMiner web API response to official API format.
+
+    Args:
+        web_response: Raw response from AMiner web API
+
+    Returns:
+        Response in official API format
+    """
+    try:
+        data = web_response["data"][0]["data"][0]
+    except (KeyError, IndexError, TypeError):
+        raise HTTPException(status_code=500, detail="Invalid AMiner API response format")
+
+    profile = data.get("profile", {})
+
+    return {
+        "code": 200,
+        "success": True,
+        "msg": "",
+        "data": {
+            # Basic info
+            "id": data.get("id", ""),
+            "name": data.get("name", ""),
+            "name_zh": data.get("name_zh", ""),
+
+            # Bio and education
+            "bio": profile.get("bio", ""),
+            "bio_zh": profile.get("bio_zh", ""),
+            "edu": profile.get("edu", ""),
+            "edu_zh": profile.get("edu_zh", ""),
+
+            # Position and organization
+            "position": profile.get("position", ""),
+            "position_zh": profile.get("position_zh", ""),
+            "orgs": [profile.get("affiliation")] if profile.get("affiliation") else [],
+            "org_zhs": [profile.get("org_zh")] if profile.get("org_zh") else [],
+
+            # Missing fields (return empty values)
+            "honor": [],
+            "award": "",
+            "create_time": "",
+            "update_time": "",
+            "year": None,
+            "domain": "",
+            "person_id": data.get("id", ""),
+        },
+        "log_id": f"custom_{uuid.uuid4().hex[:16]}"
+    }
+
+
+def extract_enriched_fields(web_response: dict) -> dict:
+    """
+    Extract enriched fields from AMiner web API response.
+
+    Args:
+        web_response: Raw response from AMiner web API
+
+    Returns:
+        Dictionary with enriched fields
+    """
+    try:
+        data = web_response["data"][0]["data"][0]
+    except (KeyError, IndexError, TypeError):
+        return {}
+
+    profile = data.get("profile", {})
+    links = data.get("links", {})
+    enriched = {}
+
+    # External links
+    if links.get("gs", {}).get("url"):
+        enriched["google_scholar"] = links["gs"]["url"]
+
+    # DBLP link
+    for resource in links.get("resource", {}).get("resource_link", []):
+        if resource.get("id") == "dblp" and resource.get("url"):
+            enriched["dblp"] = resource["url"]
+
+    # Contact info
+    if profile.get("homepage"):
+        enriched["homepage"] = profile["homepage"]
+
+    if profile.get("phone"):
+        enriched["phone"] = profile["phone"]
+
+    # AMiner avatar
+    if data.get("avatar"):
+        enriched["avatar_aminer"] = data["avatar"]
+
+    # Academic indices
+    if data.get("indices"):
+        indices_data = data["indices"]
+        enriched["indices"] = {
+            "hindex": indices_data.get("hindex"),
+            "gindex": indices_data.get("gindex"),
+            "citations": indices_data.get("citations"),
+            "pubs": indices_data.get("pubs"),
+            "activity": indices_data.get("activity"),
+            "diversity": indices_data.get("diversity"),
+            "sociability": indices_data.get("sociability"),
+            "newStar": indices_data.get("newStar"),
+            "risingStar": indices_data.get("risingStar"),
+        }
+
+    # Research tags
+    if data.get("tags"):
+        enriched["research_tags"] = data["tags"][:10]
+
+    if data.get("tags_score"):
+        enriched["research_tags_scores"] = data["tags_score"][:10]
+
+    # AMiner stats
+    enriched["aminer_stats"] = {
+        "num_viewed": data.get("num_viewed", 0),
+        "num_followed": data.get("num_followed", 0),
+        "num_upvoted": data.get("num_upvoted", 0),
+    }
+
+    # Other contact info
+    if profile.get("address"):
+        enriched["address"] = profile["address"]
+
+    if profile.get("fax"):
+        enriched["fax"] = profile["fax"]
+
+    return enriched
+
+
+@app.get("/api/aminer/scholar/detail")
+async def get_aminer_scholar_detail(
+    id: str = Query(..., description="AMiner scholar ID"),
+    authorization: Optional[str] = Header(None, description="AMiner authorization token"),
+    x_signature: Optional[str] = Header(None, alias="X-Signature", description="AMiner API signature"),
+    x_timestamp: Optional[str] = Header(None, alias="X-Timestamp", description="AMiner API timestamp"),
+    force_refresh: bool = Query(False, description="Force refresh cache"),
+):
+    """
+    Get scholar detail from AMiner web API with caching.
+
+    This endpoint mimics the official AMiner API format while using the web API internally.
+    Responses are cached for 15 days by default.
+
+    Headers required:
+    - Authorization: AMiner bearer token
+    - X-Signature: Request signature
+    - X-Timestamp: Request timestamp
+
+    Query parameters:
+    - id: Scholar AMiner ID (required)
+    - force_refresh: Force refresh cache (optional, default: false)
+    """
+    logger.info(f"[API Request] GET /api/aminer/scholar/detail - Scholar ID: {id}, Force Refresh: {force_refresh}")
+
+    # Validate required headers
+    if not authorization:
+        logger.warning(f"[API Request] Missing Authorization header for scholar {id}")
+        raise HTTPException(status_code=400, detail="Authorization header is required")
+    if not x_signature:
+        logger.warning(f"[API Request] Missing X-Signature header for scholar {id}")
+        raise HTTPException(status_code=400, detail="X-Signature header is required")
+    if not x_timestamp:
+        logger.warning(f"[API Request] Missing X-Timestamp header for scholar {id}")
+        raise HTTPException(status_code=400, detail="X-Timestamp header is required")
+
+    # Check cache
+    cache_path = get_aminer_web_api_cache_path(id)
+
+    if not force_refresh and is_aminer_cache_valid(cache_path):
+        # Return cached response
+        cache_age_seconds = datetime.now().timestamp() - cache_path.stat().st_mtime
+        cache_age_days = cache_age_seconds / (24 * 60 * 60)
+        logger.info(f"[Cache] ✓ Cache HIT for scholar {id} - Age: {cache_age_days:.1f} days ({cache_age_seconds/3600:.1f} hours)")
+        logger.info(f"[Cache] Returning cached data from: {cache_path}")
+
+        try:
+            with open(cache_path, "r", encoding="utf-8") as f:
+                cached_data = json.load(f)
+            logger.debug(f"[Cache] Cached response: {json.dumps(cached_data, ensure_ascii=False, indent=2)}")
+            return cached_data
+        except Exception as e:
+            # If cache read fails, fetch fresh data
+            logger.error(f"[Cache] Failed to read cache for {id}: {e}")
+            logger.info(f"[Cache] Falling back to fetching fresh data")
+    else:
+        if force_refresh:
+            logger.info(f"[Cache] ⟳ Force refresh requested for scholar {id}")
+        elif not cache_path.exists():
+            logger.info(f"[Cache] ✗ Cache MISS for scholar {id} - No cache file found")
+        else:
+            cache_age_seconds = datetime.now().timestamp() - cache_path.stat().st_mtime
+            cache_age_days = cache_age_seconds / (24 * 60 * 60)
+            logger.info(f"[Cache] ✗ Cache EXPIRED for scholar {id} - Age: {cache_age_days:.1f} days (TTL: 15 days)")
+
+    # Fetch from AMiner web API
+    logger.info(f"[Data Source] Fetching fresh data from AMiner web API for scholar {id}")
+    web_response = await fetch_aminer_web_api(id, authorization, x_signature, x_timestamp)
+
+    logger.info(f"[Data Processing] Converting web API response to official format")
+    logger.debug(f"[Data Processing] Raw web API response: {json.dumps(web_response, ensure_ascii=False, indent=2)}")
+
+    # Check if AMiner API returned an error
+    if "data" in web_response and len(web_response["data"]) > 0:
+        first_item = web_response["data"][0]
+        if first_item.get("succeed") is False:
+            error_code = first_item.get("code", "unknown")
+            error_context = first_item.get("meta", {}).get("context", "")
+            logger.error(f"[AMiner API] Request failed - Code: {error_code}, Context: {error_context}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"AMiner API error: Scholar not found or unavailable (code: {error_code})"
+            )
+
+    # Convert to official format
+    official_response = convert_web_api_to_official_format(web_response)
+
+    # Add enriched fields
+    enriched_fields = extract_enriched_fields(web_response)
+    if enriched_fields:
+        logger.info(f"[Data Processing] Extracted {len(enriched_fields)} enriched fields")
+        logger.debug(f"[Data Processing] Enriched fields: {json.dumps(enriched_fields, ensure_ascii=False, indent=2)}")
+        official_response["enriched"] = enriched_fields
+
+    # Cache the response
+    try:
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(official_response, f, indent=2, ensure_ascii=False)
+        logger.info(f"[Cache] ✓ Cached response for scholar {id} to: {cache_path}")
+    except Exception as e:
+        logger.error(f"[Cache] Failed to cache response for {id}: {e}")
+
+    logger.info(f"[API Response] Successfully processed scholar {id}")
+    return official_response
+
+
+@app.post("/api/aminer/cache/clear")
+def clear_aminer_cache():
+    """Clear all cached AMiner web API responses."""
+    logger.info("[Cache Management] Clearing all AMiner API cache")
+    count = 0
+    for file in AMINER_WEB_API_CACHE_DIR.iterdir():
+        if file.is_file():
+            logger.debug(f"[Cache Management] Deleting cache file: {file.name}")
+            file.unlink()
+            count += 1
+    logger.info(f"[Cache Management] ✓ Cleared {count} cached files")
+    return {"status": "aminer cache cleared", "files_deleted": count}
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=37801, reload=True)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=37801,
+        reload=True,
+        reload_excludes=["aminer_web_api_cache/*", "avatar_cache/*"]
+    )

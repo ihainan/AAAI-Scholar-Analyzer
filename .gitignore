@@ -25,3 +25,5 @@ website/backend/avatar_cache/
 website/backend/uv.lock
 website/frontend/node_modules/
 website/frontend/dist/
+website/backend/aminer_web_api_cache/
+
