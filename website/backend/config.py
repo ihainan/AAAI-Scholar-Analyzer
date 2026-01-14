@@ -56,6 +56,11 @@ class Settings(BaseSettings):
         return self.data_dir / "aminer" / "papers"
 
     @property
+    def aminer_avatars_dir(self) -> Path:
+        """Get AMiner avatars directory."""
+        return self.data_dir / "aminer" / "avatars"
+
+    @property
     def enriched_scholars_dir(self) -> Path:
         """Get enriched scholars data directory."""
         return self.data_dir / "enriched" / "scholars"

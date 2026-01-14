@@ -123,6 +123,25 @@ def mark_avatar_fetch_failed(url: str):
     fail_marker.touch()
 
 
+def get_local_avatar_path(aminer_id: str) -> Optional[Path]:
+    """
+    Check if avatar exists locally in data/aminer/avatars and is not a default avatar.
+    Returns the path to the avatar file if found.
+    """
+    # Check for .default marker - if exists, this scholar has default avatar
+    default_marker = settings.aminer_avatars_dir / f"{aminer_id}.default"
+    if default_marker.exists():
+        return None
+
+    # Check for avatar files (try all extensions)
+    for ext in ['.jpg', '.jpeg', '.png']:
+        avatar_path = settings.aminer_avatars_dir / f"{aminer_id}{ext}"
+        if avatar_path.exists():
+            return avatar_path
+
+    return None
+
+
 def get_scholar_photo_url(aminer_id: Optional[str]) -> Optional[str]:
     """
     Get the original photo URL for a scholar.
@@ -149,11 +168,21 @@ def get_scholar_photo(aminer_id: Optional[str]) -> Optional[str]:
     """
     Get scholar photo URL (proxied through our API for caching).
     Returns the proxy URL that will cache and serve the avatar.
+
+    Priority:
+    1. Local avatar in data/aminer/avatars (if exists and not default)
+    2. Our own cached/proxied avatar
     """
     if not aminer_id:
         return None
 
-    # Return proxy URL - frontend will request this, and we'll cache the avatar
+    # Check if we have a local avatar
+    local_avatar_path = get_local_avatar_path(aminer_id)
+    if local_avatar_path:
+        # Return URL to serve the local avatar
+        return f"/api/avatar/local/{aminer_id}"
+
+    # Fall back to proxy URL - frontend will request this, and we'll cache the avatar
     return f"/api/avatar/{aminer_id}"
 
 
@@ -243,7 +272,9 @@ class ConferencePaper(BaseModel):
     room: Optional[str] = None
     date: Optional[str] = None
     presentation_type: Optional[str] = None
-    coauthors: list[ConferencePaperAuthor] = []
+    authors: list[ConferencePaperAuthor] = []  # All authors in original order (including current scholar)
+    coauthors: list[ConferencePaperAuthor] = []  # Co-authors only (excluding current scholar)
+    author_position: Optional[int] = None  # Position of current scholar in author list (1-indexed)
     abstract: Optional[str] = None
 
 
@@ -407,7 +438,7 @@ def get_conference_scholars_data(conference_id: str):
 def get_conference_authors(conference_id: str):
     """
     Get authors for a specific conference (paper authors with metrics).
-    Returns data from authors.json file.
+    Returns data from authors.json file with photo_url added for each author.
     """
     conference_dir = settings.data_dir / conference_id
     authors_path = conference_dir / "authors.json"
@@ -420,6 +451,13 @@ def get_conference_authors(conference_id: str):
 
     try:
         authors_data = load_json_file(str(authors_path))
+
+        # Add photo_url for each author (prioritizing local avatars)
+        authors = authors_data.get("authors", [])
+        for author in authors:
+            aminer_id = author.get("aminer_id")
+            author["photo_url"] = get_scholar_photo(aminer_id)
+
         return authors_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading authors data: {e}")
@@ -651,20 +689,29 @@ def get_scholar_conference_papers(conference_id: str, scholar_name_normalized: s
                     except Exception as e:
                         print(f"Error loading AMiner paper {aminer_paper_id}: {e}")
 
-            # Build coauthors list
+            # Build authors and coauthors lists, track scholar position
+            authors = []
             coauthors = []
-            for author_name in paper.get("authors", []):
+            author_position = None
+            for index, author_name in enumerate(paper.get("authors", []), start=1):
                 author_name_normalized = author_name.lower()
-                # Skip the scholar themselves
-                if author_name_normalized == scholar_name_normalized:
-                    continue
-
                 author_info = authors_map.get(author_name_normalized, {})
-                coauthors.append(ConferencePaperAuthor(
+
+                author = ConferencePaperAuthor(
                     name=author_name,
                     aminer_id=author_info.get("aminer_id"),
                     in_conference=bool(author_info.get("aminer_id")),
-                ))
+                )
+
+                # Add to full authors list
+                authors.append(author)
+
+                # Check if this is the current scholar
+                if author_name_normalized == scholar_name_normalized:
+                    author_position = index
+                else:
+                    # Add to coauthors only if not the current scholar
+                    coauthors.append(author)
 
             # Determine presentation type from source file
             presentation_type = None
@@ -682,7 +729,9 @@ def get_scholar_conference_papers(conference_id: str, scholar_name_normalized: s
                 room=paper.get("room"),
                 date=paper.get("date"),
                 presentation_type=presentation_type,
+                authors=authors,
                 coauthors=coauthors,
+                author_position=author_position,
                 abstract=abstract,
             ))
 
@@ -691,6 +740,31 @@ def get_scholar_conference_papers(conference_id: str, scholar_name_normalized: s
     except Exception as e:
         print(f"Error loading conference papers for {scholar_name_normalized}: {e}")
         return None
+
+
+@app.get("/api/avatar/local/{aminer_id}")
+async def get_local_avatar_endpoint(aminer_id: str):
+    """
+    Get avatar image from local storage (data/aminer/avatars).
+    This endpoint serves avatars that were downloaded by the download script.
+    """
+    # Check if we have a local avatar
+    local_avatar_path = get_local_avatar_path(aminer_id)
+    if not local_avatar_path:
+        raise HTTPException(status_code=404, detail="Avatar not found locally")
+
+    # Determine content type from extension
+    ext = local_avatar_path.suffix.lower()
+    content_types = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+    }
+    content_type = content_types.get(ext, "image/jpeg")
+
+    return FileResponse(local_avatar_path, media_type=content_type)
 
 
 @app.get("/api/avatar/{aminer_id}")

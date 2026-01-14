@@ -254,7 +254,14 @@ export default function ScholarDetail() {
             <section className="section">
               <h2>Conference Papers</h2>
               <div className="conference-papers-list">
-                {scholar.conference_papers.map((paper, index) => (
+                {[...scholar.conference_papers]
+                  .sort((a, b) => {
+                    // Sort by author position (1st author first, 2nd author second, etc.)
+                    const posA = a.author_position ?? 999;
+                    const posB = b.author_position ?? 999;
+                    return posA - posB;
+                  })
+                  .map((paper, index) => (
                   <div key={index} className="paper-card">
                     <div className="paper-header">
                       <h3 className="paper-title">{paper.title}</h3>
@@ -278,24 +285,24 @@ export default function ScholarDetail() {
                       </div>
                     )}
 
-                    {paper.coauthors && paper.coauthors.length > 0 && (
+                    {(paper.authors && paper.authors.length > 0) && (
                       <div className="paper-coauthors">
-                        <span className="coauthors-label">Co-authors: </span>
-                        {paper.coauthors.map((coauthor, coauthorIndex) => (
-                          <span key={coauthorIndex}>
-                            {coauthor.in_conference && coauthor.aminer_id ? (
+                        <span className="coauthors-label">Authors: </span>
+                        {paper.authors.map((author, authorIndex) => (
+                          <span key={authorIndex}>
+                            {author.in_conference && author.aminer_id ? (
                               <a
-                                href={`/conference/${conferenceId}/scholar?aminer_id=${coauthor.aminer_id}`}
+                                href={`/conference/${conferenceId}/scholar?aminer_id=${author.aminer_id}`}
                                 className="coauthor-link"
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
-                                {coauthor.name}
+                                {author.name}
                               </a>
                             ) : (
-                              <span className="coauthor-name">{coauthor.name}</span>
+                              <span className="coauthor-name">{author.name}</span>
                             )}
-                            {coauthorIndex < paper.coauthors.length - 1 && ', '}
+                            {authorIndex < paper.authors.length - 1 && ', '}
                           </span>
                         ))}
                       </div>

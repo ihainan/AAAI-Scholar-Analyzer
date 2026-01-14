@@ -92,7 +92,9 @@ export interface ConferencePaper {
   room?: string;
   date?: string;
   presentation_type?: string;
-  coauthors: ConferencePaperAuthor[];
+  authors?: ConferencePaperAuthor[];  // All authors in original order
+  coauthors: ConferencePaperAuthor[];  // Co-authors only (for backwards compatibility)
+  author_position?: number;  // Position of current scholar in author list (1-indexed)
   abstract?: string;
 }
 
