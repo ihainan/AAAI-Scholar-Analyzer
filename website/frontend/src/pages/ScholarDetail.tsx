@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { searchScholar, getConferences, getPhotoUrl } from '../api';
 import type { ScholarDetail as ScholarDetailType, Conference } from '../types';
+import AcademicRadarChart from '../components/AcademicRadarChart';
 import './ScholarDetail.css';
 
 function getInitials(name: string): string {
@@ -24,6 +25,15 @@ function parseEducation(edu: string): string[] {
     .split(/<br\s*\/?>/gi)
     .map(entry => entry.replace(/<[^>]*>/g, '').trim())
     .filter(entry => entry.length > 0);
+}
+
+function parseAdditionalInfo(info: string): string[] {
+  // Split by periods (sentences) and filter out empty entries
+  return info
+    .split(/\.\s+/)
+    .map(entry => entry.trim())
+    .filter(entry => entry.length > 0)
+    .map(entry => entry.endsWith('.') ? entry : entry + '.');
 }
 
 export default function ScholarDetail() {
@@ -144,6 +154,10 @@ export default function ScholarDetail() {
             </div>
           )}
 
+          {scholar.indices && (
+            <AcademicRadarChart indices={scholar.indices} />
+          )}
+
           {scholar.email && (
             <div className="contact-info">
               <h3>Contact</h3>
@@ -217,7 +231,11 @@ export default function ScholarDetail() {
           {scholar.additional_info && (
             <section className="section">
               <h2>Additional Information</h2>
-              <p className="bio">{scholar.additional_info}</p>
+              <ul className="additional-info-list">
+                {parseAdditionalInfo(scholar.additional_info).map((entry, index) => (
+                  <li key={index}>{entry}</li>
+                ))}
+              </ul>
             </section>
           )}
 
@@ -229,6 +247,69 @@ export default function ScholarDetail() {
                   <li key={index}>{entry}</li>
                 ))}
               </ul>
+            </section>
+          )}
+
+          {scholar.conference_papers && scholar.conference_papers.length > 0 && (
+            <section className="section">
+              <h2>Conference Papers</h2>
+              <div className="conference-papers-list">
+                {scholar.conference_papers.map((paper, index) => (
+                  <div key={index} className="paper-card">
+                    <div className="paper-header">
+                      <h3 className="paper-title">{paper.title}</h3>
+                      <div className="paper-badges">
+                        {paper.track && (
+                          <span className="badge badge-track">{paper.track}</span>
+                        )}
+                        {paper.presentation_type && (
+                          <span className={`badge badge-${paper.presentation_type}`}>
+                            {paper.presentation_type}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {(paper.date || paper.session || paper.room) && (
+                      <div className="paper-info">
+                        {paper.date && <span className="paper-date">{paper.date}</span>}
+                        {paper.session && <span className="paper-session">{paper.session}</span>}
+                        {paper.room && <span className="paper-room">{paper.room}</span>}
+                      </div>
+                    )}
+
+                    {paper.coauthors && paper.coauthors.length > 0 && (
+                      <div className="paper-coauthors">
+                        <span className="coauthors-label">Co-authors: </span>
+                        {paper.coauthors.map((coauthor, coauthorIndex) => (
+                          <span key={coauthorIndex}>
+                            {coauthor.in_conference && coauthor.aminer_id ? (
+                              <a
+                                href={`/conference/${conferenceId}/scholar?aminer_id=${coauthor.aminer_id}`}
+                                className="coauthor-link"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                {coauthor.name}
+                              </a>
+                            ) : (
+                              <span className="coauthor-name">{coauthor.name}</span>
+                            )}
+                            {coauthorIndex < paper.coauthors.length - 1 && ', '}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+
+                    {paper.abstract && (
+                      <details className="paper-abstract">
+                        <summary>Abstract</summary>
+                        <p>{paper.abstract}</p>
+                      </details>
+                    )}
+                  </div>
+                ))}
+              </div>
             </section>
           )}
 

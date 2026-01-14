@@ -229,6 +229,34 @@ class LabelsConfig(BaseModel):
     labels: list[LabelDefinition]
 
 
+class ConferencePaperAuthor(BaseModel):
+    name: str
+    aminer_id: Optional[str] = None
+    in_conference: bool = False
+
+
+class ConferencePaper(BaseModel):
+    paper_id: str
+    title: str
+    track: Optional[str] = None
+    session: Optional[str] = None
+    room: Optional[str] = None
+    date: Optional[str] = None
+    presentation_type: Optional[str] = None
+    coauthors: list[ConferencePaperAuthor] = []
+    abstract: Optional[str] = None
+
+
+class AcademicIndices(BaseModel):
+    hindex: Optional[float] = None
+    gindex: Optional[float] = None
+    citations: Optional[int] = None
+    pubs: Optional[int] = None
+    activity: Optional[float] = None
+    diversity: Optional[float] = None
+    sociability: Optional[float] = None
+
+
 class ScholarDetail(BaseModel):
     # Basic info from scholars.json
     name: str
@@ -263,6 +291,12 @@ class ScholarDetail(BaseModel):
 
     # Labels
     labels: Optional[ScholarLabels] = None
+
+    # Academic indices from enriched data
+    indices: Optional[AcademicIndices] = None
+
+    # Conference papers
+    conference_papers: Optional[list[ConferencePaper]] = None
 
 
 class HealthResponse(BaseModel):
@@ -347,19 +381,12 @@ def get_conference_scholars(conference_id: str):
     return scholars
 
 
-@app.get("/api/conferences/{conference_id}/scholars/search", response_model=list[ScholarDetail])
-def search_scholars(
-    conference_id: str,
-    name: Optional[str] = Query(None, description="Scholar name to search"),
-    aminer_id: Optional[str] = Query(None, description="AMiner ID to search"),
-):
+@app.get("/api/conferences/{conference_id}/data/scholars")
+def get_conference_scholars_data(conference_id: str):
     """
-    Search for scholars by name and/or aminer_id (OR logic).
-    Returns detailed scholar information.
+    Get raw scholars data for a specific conference.
+    Returns data from scholars.json file.
     """
-    if not name and not aminer_id:
-        raise HTTPException(status_code=400, detail="At least one of 'name' or 'aminer_id' must be provided")
-
     conference_dir = settings.data_dir / conference_id
     scholars_path = conference_dir / "scholars.json"
 
@@ -371,33 +398,112 @@ def search_scholars(
 
     try:
         scholars_data = load_json_file(str(scholars_path))
+        return scholars_data
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading scholars data: {e}")
 
-    talents = scholars_data.get("talents", [])
 
-    # Filter by name OR aminer_id
+@app.get("/api/conferences/{conference_id}/authors")
+def get_conference_authors(conference_id: str):
+    """
+    Get authors for a specific conference (paper authors with metrics).
+    Returns data from authors.json file.
+    """
+    conference_dir = settings.data_dir / conference_id
+    authors_path = conference_dir / "authors.json"
+
+    if not conference_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Conference not found: {conference_id}")
+
+    if not authors_path.exists():
+        raise HTTPException(status_code=404, detail=f"Authors data not found for conference: {conference_id}")
+
+    try:
+        authors_data = load_json_file(str(authors_path))
+        return authors_data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error loading authors data: {e}")
+
+
+@app.get("/api/conferences/{conference_id}/scholars/search", response_model=list[ScholarDetail])
+def search_scholars(
+    conference_id: str,
+    name: Optional[str] = Query(None, description="Scholar name to search"),
+    aminer_id: Optional[str] = Query(None, description="AMiner ID to search"),
+):
+    """
+    Search for scholars by name and/or aminer_id (OR logic).
+    Returns detailed scholar information.
+    Searches in both scholars.json (conference organizers) and authors.json (paper authors).
+    """
+    if not name and not aminer_id:
+        raise HTTPException(status_code=400, detail="At least one of 'name' or 'aminer_id' must be provided")
+
+    conference_dir = settings.data_dir / conference_id
+
+    if not conference_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Conference not found: {conference_id}")
+
+    # Search in scholars.json first (conference organizers)
     matching_talents = []
-    for talent in talents:
-        match = False
-        if name and talent.get("name", "").lower() == name.lower():
-            match = True
-        if aminer_id and talent.get("aminer_id") == aminer_id:
-            match = True
-        if match:
-            matching_talents.append(talent)
+    scholars_path = conference_dir / "scholars.json"
+    if scholars_path.exists():
+        try:
+            scholars_data = load_json_file(str(scholars_path))
+            talents = scholars_data.get("talents", [])
+
+            for talent in talents:
+                match = False
+                if name and talent.get("name", "").lower() == name.lower():
+                    match = True
+                if aminer_id and talent.get("aminer_id") == aminer_id:
+                    match = True
+                if match:
+                    matching_talents.append(talent)
+        except Exception as e:
+            print(f"Error loading scholars data: {e}")
+
+    # If not found in scholars.json, search in authors.json (paper authors)
+    if not matching_talents:
+        authors_path = conference_dir / "authors.json"
+        if authors_path.exists():
+            try:
+                authors_data = load_json_file(str(authors_path))
+                authors = authors_data.get("authors", [])
+
+                for author in authors:
+                    match = False
+                    if name and author.get("name", "").lower() == name.lower():
+                        match = True
+                    if aminer_id and author.get("aminer_id") == aminer_id:
+                        match = True
+                    if match:
+                        # Convert author format to talent format
+                        talent = {
+                            "name": author.get("name"),
+                            "aminer_id": author.get("aminer_id"),
+                            "affiliation": author.get("organization"),
+                            "roles": [],  # Authors don't have roles
+                            "description": None,
+                        }
+                        matching_talents.append(talent)
+            except Exception as e:
+                print(f"Error loading authors data: {e}")
+
+    if not matching_talents:
+        raise HTTPException(status_code=404, detail="Scholar not found")
 
     # Build detailed response
     results = []
     for talent in matching_talents:
         scholar_aminer_id = talent.get("aminer_id")
-        detail = build_scholar_detail(talent, scholar_aminer_id)
+        detail = build_scholar_detail(talent, scholar_aminer_id, conference_id)
         results.append(detail)
 
     return results
 
 
-def build_scholar_detail(talent: dict, aminer_id: Optional[str]) -> ScholarDetail:
+def build_scholar_detail(talent: dict, aminer_id: Optional[str], conference_id: str) -> ScholarDetail:
     """Build detailed scholar information from multiple sources."""
     photo_url = get_scholar_photo(aminer_id)
 
@@ -453,6 +559,19 @@ def build_scholar_detail(talent: dict, aminer_id: Optional[str]) -> ScholarDetai
                 detail.semantic_scholar = enriched_data.get("semantic_scholar")
                 detail.additional_info = enriched_data.get("additional_info")
 
+                # Load academic indices
+                if enriched_data.get("indices"):
+                    indices_data = enriched_data["indices"]
+                    detail.indices = AcademicIndices(
+                        hindex=indices_data.get("hindex"),
+                        gindex=indices_data.get("gindex"),
+                        citations=indices_data.get("citations"),
+                        pubs=indices_data.get("pubs"),
+                        activity=indices_data.get("activity"),
+                        diversity=indices_data.get("diversity"),
+                        sociability=indices_data.get("sociability"),
+                    )
+
                 # Load labels if available
                 if enriched_data.get("labels"):
                     labels_data = enriched_data["labels"]
@@ -463,7 +582,115 @@ def build_scholar_detail(talent: dict, aminer_id: Optional[str]) -> ScholarDetai
             except Exception as e:
                 print(f"Error loading enriched data for {aminer_id}: {e}")
 
+    # Load conference papers
+    scholar_name_normalized = talent.get("name", "").lower()
+    detail.conference_papers = get_scholar_conference_papers(conference_id, scholar_name_normalized)
+
     return detail
+
+
+def get_scholar_conference_papers(conference_id: str, scholar_name_normalized: str) -> Optional[list[ConferencePaper]]:
+    """Get papers for a scholar in a specific conference."""
+    try:
+        conference_dir = settings.data_dir / conference_id
+        papers_by_author_path = conference_dir / "indexes" / "papers_by_author.json"
+        papers_path = conference_dir / "papers.json"
+        authors_path = conference_dir / "authors.json"
+
+        print(f"DEBUG: Looking for papers for scholar: '{scholar_name_normalized}'")
+        print(f"DEBUG: Conference dir: {conference_dir}")
+        print(f"DEBUG: Papers by author path exists: {papers_by_author_path.exists()}")
+        print(f"DEBUG: Papers path exists: {papers_path.exists()}")
+
+        if not papers_by_author_path.exists() or not papers_path.exists():
+            print(f"DEBUG: Missing required files, returning None")
+            return None
+
+        # Load papers by author index
+        papers_by_author = load_json_file(str(papers_by_author_path))
+        paper_ids = papers_by_author.get(scholar_name_normalized, [])
+
+        print(f"DEBUG: Found paper IDs: {paper_ids}")
+
+        if not paper_ids:
+            print(f"DEBUG: No paper IDs found, returning None")
+            return None
+
+        # Load all papers
+        papers_data = load_json_file(str(papers_path))
+        all_papers = papers_data.get("papers", [])
+
+        # Build paper ID to paper mapping
+        papers_map = {p["paper_id"]: p for p in all_papers}
+
+        # Load authors data for coauthor lookup
+        authors_map = {}
+        if authors_path.exists():
+            authors_data = load_json_file(str(authors_path))
+            for author in authors_data.get("authors", []):
+                normalized = author.get("normalized_name", "").lower()
+                if normalized:
+                    authors_map[normalized] = author
+
+        # Build conference papers list
+        conference_papers = []
+        for paper_id in paper_ids:
+            paper = papers_map.get(paper_id)
+            if not paper:
+                continue
+
+            # Get abstract from AMiner if available
+            abstract = None
+            aminer_paper_id = paper.get("aminer_paper_id")
+            if aminer_paper_id:
+                aminer_paper_path = settings.aminer_papers_dir / f"{aminer_paper_id}.json"
+                if aminer_paper_path.exists():
+                    try:
+                        aminer_paper_data = load_json_file(str(aminer_paper_path))
+                        abstract = aminer_paper_data.get("detail", {}).get("abstract")
+                    except Exception as e:
+                        print(f"Error loading AMiner paper {aminer_paper_id}: {e}")
+
+            # Build coauthors list
+            coauthors = []
+            for author_name in paper.get("authors", []):
+                author_name_normalized = author_name.lower()
+                # Skip the scholar themselves
+                if author_name_normalized == scholar_name_normalized:
+                    continue
+
+                author_info = authors_map.get(author_name_normalized, {})
+                coauthors.append(ConferencePaperAuthor(
+                    name=author_name,
+                    aminer_id=author_info.get("aminer_id"),
+                    in_conference=bool(author_info.get("aminer_id")),
+                ))
+
+            # Determine presentation type from source file
+            presentation_type = None
+            source_file = paper.get("_source_file", "")
+            if "oral" in source_file.lower():
+                presentation_type = "oral"
+            elif "poster" in source_file.lower():
+                presentation_type = "poster"
+
+            conference_papers.append(ConferencePaper(
+                paper_id=paper["paper_id"],
+                title=paper.get("title", ""),
+                track=paper.get("track"),
+                session=paper.get("session"),
+                room=paper.get("room"),
+                date=paper.get("date"),
+                presentation_type=presentation_type,
+                coauthors=coauthors,
+                abstract=abstract,
+            ))
+
+        return conference_papers if conference_papers else None
+
+    except Exception as e:
+        print(f"Error loading conference papers for {scholar_name_normalized}: {e}")
+        return None
 
 
 @app.get("/api/avatar/{aminer_id}")

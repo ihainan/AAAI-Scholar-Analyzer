@@ -78,6 +78,34 @@ export interface LabelsConfig {
   labels: LabelDefinition[];
 }
 
+export interface ConferencePaperAuthor {
+  name: string;
+  aminer_id?: string;
+  in_conference: boolean;
+}
+
+export interface ConferencePaper {
+  paper_id: string;
+  title: string;
+  track?: string;
+  session?: string;
+  room?: string;
+  date?: string;
+  presentation_type?: string;
+  coauthors: ConferencePaperAuthor[];
+  abstract?: string;
+}
+
+export interface AcademicIndices {
+  hindex?: number;
+  gindex?: number;
+  citations?: number;
+  pubs?: number;
+  activity?: number;
+  diversity?: number;
+  sociability?: number;
+}
+
 export interface ScholarDetail {
   name: string;
   aliases?: string[];
@@ -105,4 +133,6 @@ export interface ScholarDetail {
   semantic_scholar?: string;
   additional_info?: string;
   labels?: ScholarLabels;
+  indices?: AcademicIndices;
+  conference_papers?: ConferencePaper[];
 }

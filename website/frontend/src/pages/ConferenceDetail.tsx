@@ -57,7 +57,7 @@ function hasActiveFilters(filters: Record<string, FilterValue>): boolean {
 
 export default function ConferenceDetail() {
   const { conferenceId } = useParams<{ conferenceId: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [, setSearchParams] = useSearchParams();
   const [conference, setConference] = useState<Conference | null>(null);
   const [scholars, setScholars] = useState<ScholarBasic[]>([]);
   const [filteredScholars, setFilteredScholars] = useState<ScholarBasic[]>([]);
@@ -232,6 +232,22 @@ export default function ConferenceDetail() {
                   {urlInfo.name || 'Link'}
                 </a>
               ))}
+              <Link
+                to={`/conference/${conferenceId}/people`}
+                className="conference-link scholars-link"
+              >
+                Scholars
+              </Link>
+            </div>
+          )}
+          {!(conference.urls && conference.urls.length > 0) && (
+            <div className="conference-links">
+              <Link
+                to={`/conference/${conferenceId}/people`}
+                className="conference-link scholars-link"
+              >
+                Scholars
+              </Link>
             </div>
           )}
           {conference.tags && conference.tags.length > 0 && (

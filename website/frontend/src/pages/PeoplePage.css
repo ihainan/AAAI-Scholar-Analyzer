@@ -1,0 +1,264 @@
+.people-page {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+/* Breadcrumb */
+.people-page .breadcrumb {
+  margin-bottom: 24px;
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.people-page .breadcrumb a {
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.people-page .breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.people-page .breadcrumb .separator {
+  margin: 0 8px;
+  color: #999;
+}
+
+/* Header */
+.people-page .people-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+.people-page .conference-logo {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+}
+
+.people-page .conference-info h1 {
+  margin: 0 0 8px 0;
+  font-size: 2rem;
+  font-weight: 700;
+  color: #111;
+}
+
+.people-page .conference-info .location {
+  margin: 0;
+  font-size: 1rem;
+  color: #666;
+}
+
+/* Search Controls */
+.people-page .search-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.people-page .search-box {
+  position: relative;
+  flex: 1;
+  min-width: 280px;
+  max-width: 500px;
+}
+
+.people-page .search-input {
+  width: 100%;
+  padding: 10px 16px;
+  padding-right: 80px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  transition: border-color 0.2s;
+}
+
+.people-page .search-input:focus {
+  outline: none;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+}
+
+.people-page .clear-button {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  padding: 4px 12px;
+  background: #f3f4f6;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.people-page .clear-button:hover {
+  background: #e5e7eb;
+  color: #333;
+}
+
+.people-page .controls-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.people-page .sort-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.people-page .sort-control label {
+  font-size: 0.9rem;
+  color: #666;
+  font-weight: 500;
+}
+
+.people-page .sort-select {
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  background: white;
+  cursor: pointer;
+  transition: border-color 0.2s;
+}
+
+.people-page .sort-select:focus {
+  outline: none;
+  border-color: #2563eb;
+}
+
+.people-page .result-count {
+  font-size: 0.9rem;
+  color: #666;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* People Grid */
+.people-page .people-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 20px;
+  margin-bottom: 32px;
+}
+
+/* Load More */
+.people-page .load-more-container {
+  display: flex;
+  justify-content: center;
+  margin: 32px 0;
+}
+
+.people-page .load-more-button {
+  padding: 12px 32px;
+  background: white;
+  border: 2px solid #2563eb;
+  border-radius: 6px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #2563eb;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.people-page .load-more-button:hover {
+  background: #2563eb;
+  color: white;
+}
+
+.people-page .end-message {
+  text-align: center;
+  padding: 24px;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+/* Empty State */
+.people-page .empty-state {
+  text-align: center;
+  padding: 60px 24px;
+  color: #666;
+}
+
+.people-page .empty-state p {
+  margin: 0;
+  font-size: 1rem;
+}
+
+/* Loading & Error */
+.people-page .loading,
+.people-page .error {
+  text-align: center;
+  padding: 60px 24px;
+  color: #666;
+  font-size: 1rem;
+}
+
+.people-page .error {
+  color: #dc2626;
+}
+
+.people-page .back-link {
+  display: inline-block;
+  margin-top: 16px;
+  color: #2563eb;
+  text-decoration: none;
+}
+
+.people-page .back-link:hover {
+  text-decoration: underline;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .people-page .people-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .people-page .conference-logo {
+    width: 60px;
+    height: 60px;
+  }
+
+  .people-page .conference-info h1 {
+    font-size: 1.5rem;
+  }
+
+  .people-page .search-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .people-page .search-box {
+    max-width: none;
+  }
+
+  .people-page .controls-right {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .people-page .sort-control {
+    justify-content: space-between;
+  }
+
+  .people-page .people-grid {
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+  }
+}

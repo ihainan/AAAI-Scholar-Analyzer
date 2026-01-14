@@ -1,0 +1,39 @@
+.academic-radar-chart {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 8px 8px 4px 8px;
+  margin-bottom: 20px;
+  width: 180px;
+}
+
+.academic-radar-chart h3 {
+  margin: 0 0 4px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  text-align: center;
+}
+
+/* Tooltip styles */
+.radar-tooltip {
+  background: rgba(0, 0, 0, 0.85);
+  border: none;
+  border-radius: 6px;
+  padding: 8px 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.tooltip-label {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.tooltip-value {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #4CAF50;
+}

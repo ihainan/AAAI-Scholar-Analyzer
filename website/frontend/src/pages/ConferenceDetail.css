@@ -116,6 +116,18 @@
   background: #e8e8e8;
 }
 
+.conference-link.scholars-link {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: white;
+  font-weight: 500;
+}
+
+.conference-link.scholars-link:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
 .conference-tags {
   display: flex;
   flex-wrap: wrap;
