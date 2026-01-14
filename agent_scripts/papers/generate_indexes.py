@@ -153,12 +153,15 @@ def generate_stats(papers: list[dict], authors: list[dict]) -> dict:
     # Author statistics
     total_authors_with_aminer = len(authors)
     avg_papers_per_author = sum(a.get("paper_count", 0) for a in authors) / total_authors_with_aminer if total_authors_with_aminer > 0 else 0
-    avg_h_index = sum(a.get("h_index", 0) for a in authors) / total_authors_with_aminer if total_authors_with_aminer > 0 else 0
 
-    # Top authors by h-index
+    # Calculate average h-index (filter out None values)
+    h_indices = [a.get("h_index") for a in authors if a.get("h_index") is not None]
+    avg_h_index = sum(h_indices) / len(h_indices) if h_indices else 0
+
+    # Top authors by h-index (filter out None values)
     top_authors_by_hindex = sorted(
-        authors,
-        key=lambda x: x.get("h_index", 0),
+        [a for a in authors if a.get("h_index") is not None],
+        key=lambda x: x.get("h_index"),
         reverse=True
     )[:10]
 
@@ -166,7 +169,7 @@ def generate_stats(papers: list[dict], authors: list[dict]) -> dict:
         {
             "name": a.get("name"),
             "aminer_id": a.get("aminer_id"),
-            "h_index": a.get("h_index", 0),
+            "h_index": a.get("h_index"),
             "paper_count": a.get("paper_count", 0)
         }
         for a in top_authors_by_hindex

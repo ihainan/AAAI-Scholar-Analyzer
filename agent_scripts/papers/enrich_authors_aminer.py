@@ -355,7 +355,6 @@ def process_authors(
         paper_ids = author_info["paper_ids"]
 
         print(f"[{idx}/{stats['total']}] {Colors.CYAN}Processing{Colors.ENDC} {name} ({aminer_id})")
-        print(f"       Papers: {len(paper_ids)}")
 
         # Check cache first
         cached_data = None
@@ -364,11 +363,13 @@ def process_authors(
             if cached_data:
                 aminer_data, enriched_data = cached_data
                 stats["cache_hit"] += 1
+                print(f"       Papers: {len(paper_ids)} | {Colors.DIM}Cache hit{Colors.ENDC}")
                 if verbose:
-                    print(f"       {Colors.DIM}Using cached data{Colors.ENDC}")
+                    print(f"       {Colors.DIM}Using cached scholar data{Colors.ENDC}")
 
         # Fetch from API if no cache or force refresh
         if cached_data is None or force:
+            print(f"       Papers: {len(paper_ids)} | {Colors.CYAN}Fetching from API{Colors.ENDC}")
             stats["api_call"] += 1
             api_response = fetch_scholar_from_api(
                 aminer_id,
