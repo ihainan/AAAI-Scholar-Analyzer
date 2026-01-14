@@ -18,7 +18,9 @@
       "Bash(grep -i \"location:\" __NEW_LINE_3f04b68b82c028b5__ echo -e \"\\\\nAISI Presentations:\" curl -sI \"https://aaai.org/2026-ai-for-social-impact-presentations/\")",
       "Bash(grep -i \"location:\" __NEW_LINE_3f04b68b82c028b5__ echo -e \"\\\\nAISI Posters:\" curl -sI \"https://aaai.org/2026-ai-for-social-impact-posters/\")",
       "Bash(grep -i \"location:\" __NEW_LINE_3f04b68b82c028b5__ echo -e \"\\\\nAIA Presentations:\" curl -sI \"https://aaai.org/2026-ai-alignment-presentations/\")",
-      "Bash(grep -i \"location:\" __NEW_LINE_3f04b68b82c028b5__ echo -e \"\\\\nAIA Posters:\" curl -sI \"https://aaai.org/2026-ai-alignment-posters/\")"
+      "Bash(grep -i \"location:\" __NEW_LINE_3f04b68b82c028b5__ echo -e \"\\\\nAIA Posters:\" curl -sI \"https://aaai.org/2026-ai-alignment-posters/\")",
+      "Bash(jq:*)",
+      "Bash(xargs cat:*)"
     ]
   }
 }

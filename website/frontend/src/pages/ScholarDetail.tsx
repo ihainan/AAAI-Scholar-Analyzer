@@ -288,23 +288,32 @@ export default function ScholarDetail() {
                     {(paper.authors && paper.authors.length > 0) && (
                       <div className="paper-coauthors">
                         <span className="coauthors-label">Authors: </span>
-                        {paper.authors.map((author, authorIndex) => (
-                          <span key={authorIndex}>
-                            {author.in_conference && author.aminer_id ? (
-                              <a
-                                href={`/conference/${conferenceId}/scholar?aminer_id=${author.aminer_id}`}
-                                className="coauthor-link"
-                                target="_blank"
-                                rel="noopener noreferrer"
-                              >
-                                {author.name}
-                              </a>
-                            ) : (
-                              <span className="coauthor-name">{author.name}</span>
-                            )}
-                            {authorIndex < paper.authors.length - 1 && ', '}
-                          </span>
-                        ))}
+                        {paper.authors.map((author, authorIndex) => {
+                          // Check if this author is the current scholar
+                          const isCurrentScholar =
+                            (scholar.aminer_id && author.aminer_id === scholar.aminer_id) ||
+                            (!scholar.aminer_id && author.name.toLowerCase() === scholar.name.toLowerCase());
+
+                          return (
+                            <span key={authorIndex}>
+                              {author.in_conference && author.aminer_id ? (
+                                <a
+                                  href={`/conference/${conferenceId}/scholar?aminer_id=${author.aminer_id}`}
+                                  className={`coauthor-link${isCurrentScholar ? ' current-scholar-author' : ''}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                >
+                                  {author.name}
+                                </a>
+                              ) : (
+                                <span className={`coauthor-name${isCurrentScholar ? ' current-scholar-author' : ''}`}>
+                                  {author.name}
+                                </span>
+                              )}
+                              {authorIndex < paper.authors.length - 1 && ', '}
+                            </span>
+                          );
+                        })}
                       </div>
                     )}
 

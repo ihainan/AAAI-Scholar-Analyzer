@@ -548,6 +548,11 @@
   color: #333;
 }
 
+.current-scholar-author {
+  color: #1a1a1a;
+  font-weight: 700;
+}
+
 .paper-abstract {
   margin-top: 12px;
   padding-top: 12px;
