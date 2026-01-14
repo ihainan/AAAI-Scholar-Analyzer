@@ -609,13 +609,35 @@ def main():
 
             if not download_result["success"]:
                 if download_result["status_code"] == 404:
-                    print(f"      ⊘ {download_result['message']}")
-                    stats["skipped_no_email"] += 1
+                    # First attempt returned no_email, wait and retry with force_refresh
+                    print(f"      ⊘ {download_result['message']} - retrying in 10s...")
+                    time.sleep(10)
+
+                    print(f"      [Retry] Downloading with force_refresh...")
+                    retry_result = download_email_image(
+                        client, args.api_url, aminer_id,
+                        args.aminer_auth, args.aminer_signature, args.aminer_timestamp,
+                        format=args.format,
+                        force_refresh=True
+                    )
+
+                    if not retry_result["success"]:
+                        if retry_result["status_code"] == 404:
+                            print(f"      ⊘ {retry_result['message']} (after retry)")
+                            stats["skipped_no_email"] += 1
+                        else:
+                            print(f"      ✗ {retry_result['message']} (after retry)")
+                            stats["download_failed"] += 1
+                        continue
+                    else:
+                        # Retry succeeded, update download_result and continue processing
+                        download_result = retry_result
                 else:
                     print(f"      ✗ {download_result['message']}")
                     stats["download_failed"] += 1
-                continue
+                    continue
 
+            # Download succeeded (either first attempt or after retry)
             image_path = download_result["image_path"]
             print(f"      ✓ {download_result['message']}: {image_path.name}")
 
