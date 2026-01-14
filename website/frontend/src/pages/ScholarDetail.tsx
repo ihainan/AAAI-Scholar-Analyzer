@@ -166,14 +166,18 @@ export default function ScholarDetail() {
             <AcademicRadarChart indices={scholar.indices} />
           )}
 
-          {scholar.email && (
-            <div className="contact-info">
-              <h3>Contact</h3>
-              <p>
-                <a href={`mailto:${scholar.email}`}>{scholar.email}</a>
-              </p>
-            </div>
-          )}
+          {scholar.email && (() => {
+            // Split by semicolon or comma, trim whitespace, and get first email
+            const firstEmail = scholar.email.split(/[;,]/)[0].trim();
+            return (
+              <div className="contact-info">
+                <h3>Contact</h3>
+                <p>
+                  <a href={`mailto:${firstEmail}`}>{firstEmail}</a>
+                </p>
+              </div>
+            );
+          })()}
         </aside>
 
         <main className="scholar-main">

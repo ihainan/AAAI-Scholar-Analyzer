@@ -2,6 +2,7 @@
 Email image service for fetching scholar email images from AMiner.
 """
 
+import io
 import json
 import logging
 from pathlib import Path
@@ -9,6 +10,7 @@ from typing import Optional, Tuple
 
 import httpx
 from fastapi import HTTPException
+from PIL import Image
 
 from config import settings
 from services.cache_service import (
@@ -20,6 +22,72 @@ from services.cache_service import (
 from utils.http_client import http_client
 
 logger = logging.getLogger(__name__)
+
+
+def convert_transparent_to_white_bg(image_bytes: bytes, output_format: str = "PNG") -> Tuple[bytes, str]:
+    """
+    Convert image with transparent background to white background.
+
+    This is useful for OCR, as many OCR models work better with
+    black text on white background rather than transparent background.
+
+    Args:
+        image_bytes: Original image bytes (may have transparency)
+        output_format: Output format, "PNG" or "JPEG"
+
+    Returns:
+        Tuple of (converted_image_bytes, content_type)
+    """
+    try:
+        # Open image
+        img = Image.open(io.BytesIO(image_bytes))
+
+        logger.debug(f"[Image Convert] Original: mode={img.mode}, size={img.size}, format={img.format}")
+
+        # Handle transparency
+        if img.mode in ('RGBA', 'LA') or (img.mode == 'P' and 'transparency' in img.info):
+            logger.debug(f"[Image Convert] Image has transparency, converting to white background")
+
+            # Create white background
+            white_bg = Image.new('RGB', img.size, (255, 255, 255))
+
+            # Paste image on white background
+            if img.mode == 'RGBA':
+                white_bg.paste(img, mask=img.split()[3])  # Use alpha channel as mask
+            elif img.mode == 'LA':
+                white_bg.paste(img, mask=img.split()[1])  # Use alpha channel as mask
+            else:
+                white_bg.paste(img)
+
+            img = white_bg
+        else:
+            # Convert to RGB if needed
+            if img.mode != 'RGB':
+                logger.debug(f"[Image Convert] Converting {img.mode} to RGB")
+                img = img.convert('RGB')
+
+        # Save to bytes
+        output = io.BytesIO()
+        if output_format.upper() == "JPEG":
+            img.save(output, format='JPEG', quality=95, optimize=True)
+            content_type = "image/jpeg"
+        else:  # PNG
+            img.save(output, format='PNG', optimize=True)
+            content_type = "image/png"
+
+        converted_bytes = output.getvalue()
+
+        logger.info(
+            f"[Image Convert] {len(image_bytes)} bytes → {len(converted_bytes)} bytes "
+            f"({len(converted_bytes) / len(image_bytes) * 100:.1f}%), format={output_format}"
+        )
+
+        return converted_bytes, content_type
+
+    except Exception as e:
+        logger.error(f"[Image Convert] Failed to convert image: {e}")
+        # Return original image if conversion fails
+        return image_bytes, "image/png"
 
 
 async def fetch_email_image_from_aminer(
@@ -102,17 +170,20 @@ async def get_scholar_email_image(
     authorization: str,
     x_signature: str,
     x_timestamp: str,
-    force_refresh: bool = False
+    force_refresh: bool = False,
+    output_format: str = "PNG",
+    convert_to_white_bg: bool = True
 ) -> Tuple[bytes, str]:
     """
-    Get scholar email image with caching.
+    Get scholar email image with caching and optional white background conversion.
 
     This function:
     1. Checks if "no email" marker exists (cached 404)
     2. Reads cached getPerson response to extract email path
     3. Checks if email image is cached
     4. If not cached or force_refresh, fetches from AMiner
-    5. Caches the image or "no email" marker
+    5. Optionally converts transparent background to white (for better OCR)
+    6. Caches the converted image or "no email" marker
 
     Args:
         scholar_id: AMiner scholar ID
@@ -120,6 +191,8 @@ async def get_scholar_email_image(
         x_signature: Request signature
         x_timestamp: Request timestamp
         force_refresh: Force refresh cache
+        output_format: Output format, "PNG" or "JPEG" (default: "PNG")
+        convert_to_white_bg: Convert transparent background to white (default: True)
 
     Returns:
         Tuple of (image_bytes, content_type)
@@ -169,9 +242,41 @@ async def get_scholar_email_image(
         except (KeyError, IndexError, TypeError) as e:
             logger.warning(f"[Email Image] Failed to extract email from raw_response: {e}")
     else:
-        # Old format - try to extract from official_format if it has the enriched data
-        # But this is unlikely to work for old format, so we'll just log a warning
-        logger.warning(f"[Email Image] Old cache format detected - cannot extract email path reliably")
+        # Old format detected - need to refresh cache to get raw_response
+        logger.warning(
+            f"[Email Image] Old cache format detected for scholar {scholar_id}, "
+            "refreshing to get raw_response with email field"
+        )
+
+        # Import here to avoid circular dependency
+        from services.aminer_service import get_scholar_detail
+
+        # Force refresh the scholar data to get new format with raw_response
+        try:
+            logger.info(f"[Email Image] Refreshing scholar data for {scholar_id} to get email field")
+            # This will update the cache with new format (raw_response + official_format)
+            await get_scholar_detail(
+                scholar_id,
+                authorization,
+                x_signature,
+                x_timestamp,
+                force_refresh=True  # Force refresh to update cache
+            )
+
+            # Re-read the cache which should now have raw_response
+            cached_person_data = read_json_cache(person_cache_path)
+            if cached_person_data and "raw_response" in cached_person_data:
+                try:
+                    raw_response = cached_person_data["raw_response"]
+                    email_path = raw_response["data"][0]["data"][0]["profile"].get("email", "")
+                    logger.info(f"[Email Image] Successfully extracted email path after refresh")
+                except (KeyError, IndexError, TypeError) as e:
+                    logger.warning(f"[Email Image] Failed to extract email from refreshed data: {e}")
+            else:
+                logger.warning(f"[Email Image] Refreshed cache still doesn't have raw_response")
+        except Exception as e:
+            logger.error(f"[Email Image] Failed to refresh scholar data: {e}")
+            # Continue with empty email_path, will be handled below
 
     if not email_path:
         logger.info(f"[Email Image] No email found for scholar {scholar_id}")
@@ -202,42 +307,32 @@ async def get_scholar_email_image(
     logger.info(f"[Email Image] Found email path: {email_path}")
 
     # Step 2: Check email image cache
-    # Use scholar_id as cache key (one email image per scholar)
-    email_cache_base = get_cache_path(settings.email_cache_dir, scholar_id, extension="")
-
-    # Check for any existing cached email image with different extensions
-    cached_file: Optional[Path] = None
-    for ext in [".png", ".jpg", ".gif", ".webp"]:
-        potential_file = Path(str(email_cache_base) + ext)
-        if potential_file.exists():
-            cached_file = potential_file
-            break
+    # We always cache white-background PNG for best OCR compatibility and file size
+    # If user requests JPEG, we convert from cached PNG dynamically
+    email_cache_file = get_cache_path(settings.email_cache_dir, scholar_id, extension=".png")
 
     # Check if cache is valid
-    if not force_refresh and cached_file and is_cache_valid(cached_file, settings.email_cache_ttl):
-        cache_stats = get_cache_stats(cached_file)
+    if not force_refresh and email_cache_file.exists() and is_cache_valid(email_cache_file, settings.email_cache_ttl):
+        cache_stats = get_cache_stats(email_cache_file)
         logger.info(
             f"[Email Cache] HIT for scholar {scholar_id} - "
             f"Age: {cache_stats['age_days']:.1f} days ({cache_stats['age_hours']:.1f} hours)"
         )
 
-        # Read cached image
+        # Read cached image (white-background PNG)
         try:
-            with open(cached_file, "rb") as f:
-                image_bytes = f.read()
+            with open(email_cache_file, "rb") as f:
+                cached_image_bytes = f.read()
 
-            # Determine content type from extension
-            ext = cached_file.suffix
-            content_type_map = {
-                ".png": "image/png",
-                ".jpg": "image/jpeg",
-                ".gif": "image/gif",
-                ".webp": "image/webp",
-            }
-            content_type = content_type_map.get(ext, "image/png")
+            logger.info(f"[Email Cache] Returning cached image: {email_cache_file}")
 
-            logger.info(f"[Email Cache] Returning cached image: {cached_file}")
-            return image_bytes, content_type
+            # If user requests JPEG, convert from PNG
+            if output_format.upper() == "JPEG":
+                logger.info(f"[Email Cache] Converting cached PNG to JPEG for output")
+                return convert_transparent_to_white_bg(cached_image_bytes, "JPEG")
+            else:
+                # Return cached PNG directly
+                return cached_image_bytes, "image/png"
 
         except Exception as e:
             logger.error(f"[Email Cache] Failed to read cached file: {e}")
@@ -245,10 +340,10 @@ async def get_scholar_email_image(
 
     if force_refresh:
         logger.info(f"[Email Cache] Force refresh requested for scholar {scholar_id}")
-    elif not cached_file:
+    elif not email_cache_file.exists():
         logger.info(f"[Email Cache] MISS for scholar {scholar_id} - No cache file found")
     else:
-        cache_stats = get_cache_stats(cached_file)
+        cache_stats = get_cache_stats(email_cache_file)
         logger.info(
             f"[Email Cache] EXPIRED for scholar {scholar_id} - "
             f"Age: {cache_stats['age_days']:.1f} days (TTL: 30 days)"
@@ -256,18 +351,23 @@ async def get_scholar_email_image(
 
     # Step 3: Fetch from AMiner
     logger.info(f"[Email Image] Fetching fresh data from AMiner for scholar {scholar_id}")
-    image_bytes, content_type = await fetch_email_image_from_aminer(
+    raw_image_bytes, raw_content_type = await fetch_email_image_from_aminer(
         email_path, authorization, x_signature, x_timestamp
     )
 
-    # Step 4: Cache the image
-    ext = get_image_extension(content_type)
-    cache_file = Path(str(email_cache_base) + ext)
+    # Step 4: Convert to white background PNG for caching (best for OCR and file size)
+    if convert_to_white_bg:
+        logger.info(f"[Email Image] Converting to white background PNG for caching")
+        cached_image_bytes, _ = convert_transparent_to_white_bg(raw_image_bytes, "PNG")
+    else:
+        logger.info(f"[Email Image] Using original image without conversion")
+        cached_image_bytes = raw_image_bytes
 
+    # Step 5: Cache the converted white-background PNG
     try:
-        with open(cache_file, "wb") as f:
-            f.write(image_bytes)
-        logger.info(f"[Email Cache] Cached image for scholar {scholar_id} to: {cache_file}")
+        with open(email_cache_file, "wb") as f:
+            f.write(cached_image_bytes)
+        logger.info(f"[Email Cache] Cached white-background PNG for scholar {scholar_id} to: {email_cache_file}")
 
         # Remove no-email marker if it exists (email is now available)
         no_email_marker = get_cache_path(settings.email_cache_dir, scholar_id, extension=".no_email")
@@ -275,7 +375,23 @@ async def get_scholar_email_image(
             no_email_marker.unlink()
             logger.info(f"[Email Cache] Removed no-email marker for scholar {scholar_id}")
 
+        # Delete old cached images with different extensions
+        email_cache_base = get_cache_path(settings.email_cache_dir, scholar_id, extension="")
+        for ext in [".jpg", ".jpeg", ".gif", ".webp"]:
+            old_file = Path(str(email_cache_base) + ext)
+            if old_file.exists() and old_file != email_cache_file:
+                try:
+                    old_file.unlink()
+                    logger.info(f"[Email Cache] Removed old cached image: {old_file}")
+                except Exception as e:
+                    logger.error(f"[Email Cache] Failed to remove old image: {e}")
+
     except Exception as e:
         logger.error(f"[Email Cache] Failed to cache image: {e}")
 
-    return image_bytes, content_type
+    # Step 6: Return in requested format
+    if output_format.upper() == "JPEG":
+        logger.info(f"[Email Image] Converting to JPEG for output")
+        return convert_transparent_to_white_bg(cached_image_bytes, "JPEG")
+    else:
+        return cached_image_bytes, "image/png"
