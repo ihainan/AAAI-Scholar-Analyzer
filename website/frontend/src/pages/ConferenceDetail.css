@@ -170,8 +170,15 @@
 .scholars-header {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  margin-bottom: 16px;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.scholars-header h2 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #1a1a1a;
 }
 
 .filter-button {

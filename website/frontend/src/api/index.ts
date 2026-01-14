@@ -1,4 +1,4 @@
-import type { Conference, ScholarBasic, ScholarDetail, LabelsConfig, AuthorBasic, AuthorDetail } from '../types';
+import type { Conference, ScholarBasic, ScholarDetail, LabelsConfig } from '../types';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL !== undefined
   ? import.meta.env.VITE_API_BASE_URL
@@ -68,61 +68,4 @@ export async function filterScholarsByLabels(
   return fetchApi<ScholarBasic[]>(
     `/api/conferences/${conferenceId}/scholars/filter?${searchParams.toString()}`
   );
-}
-
-// Author API functions
-export async function getConferenceAuthors(
-  conferenceId: string,
-  params?: { limit?: number; offset?: number }
-): Promise<AuthorBasic[]> {
-  const searchParams = new URLSearchParams();
-  if (params?.limit !== undefined) searchParams.set('limit', params.limit.toString());
-  if (params?.offset !== undefined) searchParams.set('offset', params.offset.toString());
-
-  const query = searchParams.toString();
-  return fetchApi<AuthorBasic[]>(
-    `/api/conferences/${conferenceId}/authors${query ? `?${query}` : ''}`
-  );
-}
-
-export async function searchAuthors(
-  conferenceId: string,
-  params: {
-    name?: string;
-    track?: string;
-    min_papers?: number;
-    aminer_id?: string;
-    limit?: number;
-    offset?: number;
-  }
-): Promise<AuthorBasic[]> {
-  const searchParams = new URLSearchParams();
-  if (params.name) searchParams.set('name', params.name);
-  if (params.track) searchParams.set('track', params.track);
-  if (params.min_papers !== undefined) searchParams.set('min_papers', params.min_papers.toString());
-  if (params.aminer_id) searchParams.set('aminer_id', params.aminer_id);
-  if (params.limit !== undefined) searchParams.set('limit', params.limit.toString());
-  if (params.offset !== undefined) searchParams.set('offset', params.offset.toString());
-
-  return fetchApi<AuthorBasic[]>(
-    `/api/conferences/${conferenceId}/authors/search?${searchParams.toString()}`
-  );
-}
-
-export async function getAuthorDetail(
-  conferenceId: string,
-  authorName: string
-): Promise<AuthorDetail> {
-  return fetchApi<AuthorDetail>(
-    `/api/conferences/${conferenceId}/authors/${encodeURIComponent(authorName)}`
-  );
-}
-
-export async function getAuthorsCount(
-  conferenceId: string
-): Promise<number> {
-  const response = await fetchApi<{ count: number }>(
-    `/api/conferences/${conferenceId}/authors/count`
-  );
-  return response.count;
 }

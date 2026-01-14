@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { getConferences, getConferenceScholars, getLabelsConfig, filterScholarsByLabels, getConferenceAuthors, getAuthorsCount } from '../api';
+import { getConferences, getConferenceScholars, getLabelsConfig, filterScholarsByLabels } from '../api';
 import ScholarCard from '../components/ScholarCard';
-import AuthorCard from '../components/AuthorCard';
-import type { Conference, ScholarBasic, AuthorBasic, LabelDefinition } from '../types';
+import type { Conference, ScholarBasic, LabelDefinition } from '../types';
 import './ConferenceDetail.css';
 
 function formatDateRange(dates?: { start?: string; end?: string }): string {
@@ -56,21 +55,13 @@ function hasActiveFilters(filters: Record<string, FilterValue>): boolean {
   return Object.values(filters).some(v => v !== 'any');
 }
 
-type TabType = 'scholars' | 'authors';
-
 export default function ConferenceDetail() {
   const { conferenceId } = useParams<{ conferenceId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const [conference, setConference] = useState<Conference | null>(null);
   const [scholars, setScholars] = useState<ScholarBasic[]>([]);
   const [filteredScholars, setFilteredScholars] = useState<ScholarBasic[]>([]);
-  const [authors, setAuthors] = useState<AuthorBasic[]>([]);
-  const [authorsPage, setAuthorsPage] = useState(1);
-  const [authorsTotalCount, setAuthorsTotalCount] = useState(0);
-  const authorsPerPage = 50;
-  const [activeTab, setActiveTab] = useState<TabType>('scholars');
   const [loading, setLoading] = useState(true);
-  const [authorsLoading, setAuthorsLoading] = useState(false);
   const [filterLoading, setFilterLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [labelDefinitions, setLabelDefinitions] = useState<LabelDefinition[]>([]);
@@ -123,11 +114,10 @@ export default function ConferenceDetail() {
 
       setLoading(true);
       try {
-        const [conferencesData, scholarsData, labelsData, authorsCount] = await Promise.all([
+        const [conferencesData, scholarsData, labelsData] = await Promise.all([
           getConferences(),
           getConferenceScholars(conferenceId),
           getLabelsConfig().catch(() => ({ version: '1.0', labels: [] })),
-          getAuthorsCount(conferenceId).catch(() => 0),
         ]);
 
         const conf = conferencesData.find(c => c.id === conferenceId);
@@ -138,7 +128,6 @@ export default function ConferenceDetail() {
         setConference(conf);
         setScholars(scholarsData);
         setLabelDefinitions(labelsData.labels);
-        setAuthorsTotalCount(authorsCount);
 
         // Initialize filters with label names
         const initialFilters: Record<string, FilterValue> = {};
@@ -169,45 +158,6 @@ export default function ConferenceDetail() {
     fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conferenceId]);
-
-
-  // Load authors for current page
-  useEffect(() => {
-    async function loadAuthors() {
-      if (!conferenceId || activeTab !== 'authors') return;
-
-      setAuthorsLoading(true);
-      try {
-        const offset = (authorsPage - 1) * authorsPerPage;
-        const authorsData = await getConferenceAuthors(conferenceId, {
-          limit: authorsPerPage,
-          offset: offset,
-        });
-        setAuthors(authorsData);
-      } catch (err) {
-        console.error('Error loading authors:', err);
-      } finally {
-        setAuthorsLoading(false);
-      }
-    }
-
-    loadAuthors();
-  }, [conferenceId, activeTab, authorsPage, authorsPerPage]);
-
-  const handleTabChange = (tab: TabType) => {
-    setActiveTab(tab);
-    // Reset to page 1 when switching tabs
-    setAuthorsPage(1);
-    // Update URL to reflect tab change
-    const newParams = new URLSearchParams(searchParams);
-    newParams.set('tab', tab);
-    setSearchParams(newParams, { replace: true });
-  };
-
-  const handleAuthorsPageChange = (page: number) => {
-    setAuthorsPage(page);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
 
   const openFilterModal = () => {
     setTempFilters({ ...filters });
@@ -294,27 +244,10 @@ export default function ConferenceDetail() {
         </div>
       </header>
 
-      <div className="tabs-container">
-        <div className="tabs">
+      <section className="scholars-section">
+        <div className="scholars-header">
+          <h2>Conference Participants ({scholars.length})</h2>
           <button
-            className={`tab ${activeTab === 'scholars' ? 'active' : ''}`}
-            onClick={() => handleTabChange('scholars')}
-          >
-            Conference Participants ({scholars.length})
-          </button>
-          <button
-            className={`tab ${activeTab === 'authors' ? 'active' : ''}`}
-            onClick={() => handleTabChange('authors')}
-          >
-            Paper Authors ({authorsTotalCount})
-          </button>
-        </div>
-      </div>
-
-      {activeTab === 'scholars' && (
-        <section className="scholars-section">
-          <div className="scholars-header">
-            <button
             className={`filter-button ${hasActiveFilters(filters) ? 'active' : ''}`}
             onClick={openFilterModal}
             title="Filter participants"
@@ -348,56 +281,6 @@ export default function ConferenceDetail() {
           </>
         )}
       </section>
-      )}
-
-      {activeTab === 'authors' && (
-        <section className="authors-section">
-          {authorsLoading ? (
-            <div className="loading">Loading authors...</div>
-          ) : (
-            <>
-              <div className="authors-grid">
-                {authors.map((author, index) => (
-                  <AuthorCard
-                    key={author.aminer_id || `${author.name}-${index}`}
-                    author={author}
-                    conferenceId={conferenceId!}
-                  />
-                ))}
-              </div>
-              {authors.length === 0 && (
-                <div className="empty-state">No authors found.</div>
-              )}
-              {authors.length > 0 && (
-                <div className="pagination-container">
-                  <div className="pagination">
-                    <button
-                      className="pagination-button"
-                      onClick={() => handleAuthorsPageChange(authorsPage - 1)}
-                      disabled={authorsPage === 1}
-                    >
-                      Previous
-                    </button>
-                    <span className="pagination-info">
-                      Page {authorsPage} of {Math.ceil(authorsTotalCount / authorsPerPage)}
-                    </span>
-                    <button
-                      className="pagination-button"
-                      onClick={() => handleAuthorsPageChange(authorsPage + 1)}
-                      disabled={authorsPage >= Math.ceil(authorsTotalCount / authorsPerPage)}
-                    >
-                      Next
-                    </button>
-                  </div>
-                  <div className="pagination-summary">
-                    Showing {(authorsPage - 1) * authorsPerPage + 1} - {Math.min(authorsPage * authorsPerPage, authorsTotalCount)} of {authorsTotalCount}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </section>
-      )}
 
       {showFilterModal && (
         <div className="modal-overlay" onClick={() => setShowFilterModal(false)}>
