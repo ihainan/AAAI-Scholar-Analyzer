@@ -34,13 +34,8 @@ export default function ScholarCard({ scholar, conferenceId, showMetrics = false
   const fromParam = fromPage ? `&from=${fromPage}` : '';
 
   // Get organization to display (prefer Chinese, fallback to English)
-  // Handle multiple organizations: take first one (split by semicolon or comma)
-  const getFirstOrg = (org?: string) => {
-    if (!org) return undefined;
-    return org.split(/[;,]/)[0].trim();
-  };
-
-  const displayOrg = getFirstOrg(scholar.organization_zh) || getFirstOrg(scholar.organization);
+  // Display full organization string
+  const displayOrg = scholar.organization_zh || scholar.organization;
 
   return (
     <Link
@@ -77,11 +72,15 @@ export default function ScholarCard({ scholar, conferenceId, showMetrics = false
         {scholar.roles && scholar.roles.length > 0 && (
           <p className="scholar-card-roles">{scholar.roles.join(', ')}</p>
         )}
-        {displayOrg && (
-          <p className="scholar-card-affiliation" title={displayOrg}>{displayOrg}</p>
-        )}
-        {!displayOrg && scholar.affiliation && (
-          <p className="scholar-card-affiliation" title={scholar.affiliation}>{scholar.affiliation}</p>
+        {(displayOrg || scholar.affiliation) && (
+          <div className="scholar-card-affiliation-wrapper">
+            {displayOrg && (
+              <p className="scholar-card-affiliation" title={displayOrg}>{displayOrg}</p>
+            )}
+            {!displayOrg && scholar.affiliation && (
+              <p className="scholar-card-affiliation" title={scholar.affiliation}>{scholar.affiliation}</p>
+            )}
+          </div>
         )}
         {showMetrics && (
           <div className="scholar-card-metrics">
