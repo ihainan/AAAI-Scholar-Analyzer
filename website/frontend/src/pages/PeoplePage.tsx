@@ -288,6 +288,7 @@ export default function PeoplePage() {
                 scholar={person}
                 conferenceId={conferenceId!}
                 showMetrics={true}
+                fromPage="people"
               />
             ))}
           </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { searchScholar, getConferences, getPhotoUrl } from '../api';
-import type { ScholarDetail as ScholarDetailType, Conference } from '../types';
+import type { ScholarDetail as ScholarDetailType, Conference, ConferencePaperAuthor } from '../types';
 import AcademicRadarChart from '../components/AcademicRadarChart';
 import './ScholarDetail.css';
 
@@ -44,6 +44,8 @@ export default function ScholarDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
+
+  const fromPage = searchParams.get('from');
 
   useEffect(() => {
     async function fetchData() {
@@ -120,6 +122,12 @@ export default function ScholarDetail() {
           {conference?.shortName || conference?.name || conferenceId}
         </Link>
         <span className="separator">/</span>
+        {fromPage === 'people' ? (
+          <>
+            <Link to={`/conference/${conferenceId}/people`}>Scholars</Link>
+            <span className="separator">/</span>
+          </>
+        ) : null}
         <span>{scholar.name}</span>
       </nav>
 
@@ -254,28 +262,53 @@ export default function ScholarDetail() {
             <section className="section">
               <h2>Conference Papers</h2>
               <div className="conference-papers-list">
-                {[...scholar.conference_papers]
-                  .sort((a, b) => {
-                    // Sort by author position (1st author first, 2nd author second, etc.)
-                    const posA = a.author_position ?? 999;
-                    const posB = b.author_position ?? 999;
-                    return posA - posB;
-                  })
-                  .map((paper, index) => (
-                  <div key={index} className="paper-card">
-                    <div className="paper-header">
-                      <h3 className="paper-title">{paper.title}</h3>
-                      <div className="paper-badges">
-                        {paper.track && (
-                          <span className="badge badge-track">{paper.track}</span>
-                        )}
-                        {paper.presentation_type && (
-                          <span className={`badge badge-${paper.presentation_type}`}>
-                            {paper.presentation_type}
-                          </span>
-                        )}
-                      </div>
-                    </div>
+                {(() => {
+                  // Group papers by title to merge duplicates with different presentation types
+                  const papersByTitle = new Map();
+                  scholar.conference_papers.forEach(paper => {
+                    const existing = papersByTitle.get(paper.title);
+                    if (existing) {
+                      // Merge presentation types
+                      if (paper.presentation_type && !existing.presentation_types.includes(paper.presentation_type)) {
+                        existing.presentation_types.push(paper.presentation_type);
+                      }
+                      // Keep the best author position (lowest number = earlier author)
+                      if (paper.author_position !== undefined &&
+                          (existing.author_position === undefined || paper.author_position < existing.author_position)) {
+                        existing.author_position = paper.author_position;
+                      }
+                    } else {
+                      papersByTitle.set(paper.title, {
+                        ...paper,
+                        presentation_types: paper.presentation_type ? [paper.presentation_type] : []
+                      });
+                    }
+                  });
+
+                  // Convert map to array and sort by author position
+                  return Array.from(papersByTitle.values())
+                    .sort((a, b) => {
+                      const posA = a.author_position ?? 999;
+                      const posB = b.author_position ?? 999;
+                      return posA - posB;
+                    })
+                    .map((paper, index) => (
+                      <div key={index} className="paper-card">
+                        <div className="paper-header">
+                          <h3 className="paper-title">{paper.title}</h3>
+                          <div className="paper-badges">
+                            {paper.track && (
+                              <span className="badge badge-track">{paper.track}</span>
+                            )}
+                            {paper.presentation_types && paper.presentation_types.length > 0 &&
+                              paper.presentation_types.map((type: string, typeIndex: number) => (
+                                <span key={typeIndex} className={`badge badge-${type}`}>
+                                  {type}
+                                </span>
+                              ))
+                            }
+                          </div>
+                        </div>
 
                     {(paper.date || paper.session || paper.room) && (
                       <div className="paper-info">
@@ -288,7 +321,7 @@ export default function ScholarDetail() {
                     {(paper.authors && paper.authors.length > 0) && (
                       <div className="paper-coauthors">
                         <span className="coauthors-label">Authors: </span>
-                        {paper.authors.map((author, authorIndex) => {
+                        {paper.authors.map((author: ConferencePaperAuthor, authorIndex: number) => {
                           // Check if this author is the current scholar
                           const isCurrentScholar =
                             (scholar.aminer_id && author.aminer_id === scholar.aminer_id) ||
@@ -317,14 +350,15 @@ export default function ScholarDetail() {
                       </div>
                     )}
 
-                    {paper.abstract && (
-                      <details className="paper-abstract">
-                        <summary>Abstract</summary>
-                        <p>{paper.abstract}</p>
-                      </details>
-                    )}
-                  </div>
-                ))}
+                        {paper.abstract && (
+                          <details className="paper-abstract">
+                            <summary>Abstract</summary>
+                            <p>{paper.abstract}</p>
+                          </details>
+                        )}
+                      </div>
+                    ));
+                })()}
               </div>
             </section>
           )}

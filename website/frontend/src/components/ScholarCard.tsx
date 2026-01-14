@@ -14,6 +14,7 @@ interface ScholarCardProps {
   };
   conferenceId: string;
   showMetrics?: boolean;
+  fromPage?: 'people' | 'conference';
 }
 
 function getInitials(name: string): string {
@@ -25,10 +26,12 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
-export default function ScholarCard({ scholar, conferenceId, showMetrics = false }: ScholarCardProps) {
+export default function ScholarCard({ scholar, conferenceId, showMetrics = false, fromPage }: ScholarCardProps) {
   const searchParam = scholar.aminer_id
     ? `aminer_id=${scholar.aminer_id}`
     : `name=${encodeURIComponent(scholar.name)}`;
+
+  const fromParam = fromPage ? `&from=${fromPage}` : '';
 
   // Get organization to display (prefer Chinese, fallback to English)
   // Handle multiple organizations: take first one (split by semicolon or comma)
@@ -41,8 +44,10 @@ export default function ScholarCard({ scholar, conferenceId, showMetrics = false
 
   return (
     <Link
-      to={`/conference/${conferenceId}/scholar?${searchParam}`}
+      to={`/conference/${conferenceId}/scholar?${searchParam}${fromParam}`}
       className="scholar-card"
+      target="_blank"
+      rel="noopener noreferrer"
     >
       <div className="scholar-card-avatar">
         {scholar.photo_url ? (
