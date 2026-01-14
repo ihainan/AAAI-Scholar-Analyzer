@@ -106,3 +106,61 @@ export interface ScholarDetail {
   additional_info?: string;
   labels?: ScholarLabels;
 }
+
+// Author related types
+export interface Paper {
+  paper_id: string;
+  title: string;
+  track: string;
+  session?: string;
+  date?: string;
+  room?: string;
+  aminer_paper_id?: string;
+}
+
+export interface AuthorStatistics {
+  total_papers: number;
+  tracks: string[];
+  collaborators_count: number;
+}
+
+export interface AuthorBasic {
+  name: string;
+  roles: string[];
+  papers: Paper[];
+  statistics: AuthorStatistics;
+  collaborators: string[];
+  description?: string;
+  aminer_id?: string;
+  photo_url?: string;
+}
+
+export interface AuthorDetail {
+  name: string;
+  roles: string[];
+  papers: Paper[];
+  statistics: AuthorStatistics;
+  collaborators: string[];
+  description?: string;
+  sources?: string[];
+  source_urls?: string[];
+  aminer_id?: string;
+  aminer_validation?: AminerValidation;
+  photo_url?: string;
+  bio?: string;
+  education?: string;
+  position?: string;
+  organizations?: string[];
+  honors?: Honor[];
+  research_interests?: ResearchInterest[];
+  homepage?: string;
+  google_scholar?: string;
+  dblp?: string;
+  linkedin?: string;
+  twitter?: string;
+  email?: string;
+  orcid?: string;
+  semantic_scholar?: string;
+  additional_info?: string;
+  labels?: ScholarLabels;
+}

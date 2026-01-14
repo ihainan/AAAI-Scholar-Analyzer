@@ -7,6 +7,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy project files (context is website directory)
 COPY backend/pyproject.toml .
+COPY backend/config.py .
 COPY backend/main.py .
 
 # Install dependencies

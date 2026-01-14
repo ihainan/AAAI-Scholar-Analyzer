@@ -1,0 +1,101 @@
+/* Import Scholar Detail styles - most styles are shared */
+@import './ScholarDetail.css';
+
+/* Additional styles specific to Author Detail */
+
+/* Papers section */
+.papers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.paper-item {
+  padding: 16px;
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  transition: box-shadow 0.2s ease;
+}
+
+.paper-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-color: #d0d0d0;
+}
+
+.paper-title {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #1a1a1a;
+  line-height: 1.4;
+}
+
+.paper-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.paper-id {
+  display: inline-block;
+  padding: 3px 8px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #666;
+  font-family: monospace;
+  font-weight: 500;
+}
+
+.paper-track {
+  display: inline-block;
+  padding: 3px 8px;
+  background: #e8f4fd;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  color: #1e40af;
+  font-weight: 500;
+}
+
+.paper-session {
+  margin: 0 0 4px;
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.4;
+}
+
+.paper-schedule {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #888;
+}
+
+.paper-schedule .separator {
+  color: #ccc;
+}
+
+/* Collaborators section */
+.collaborators-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.collaborator-tag {
+  display: inline-block;
+  padding: 6px 12px;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #444;
+  transition: all 0.15s ease;
+}
+
+.collaborator-tag:hover {
+  background: #e8e8e8;
+  border-color: #d0d0d0;
+}

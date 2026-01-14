@@ -54,7 +54,7 @@ from common_utils import (
 
 
 # API Configuration
-DEFAULT_API_BASE_URL = "http://localhost:37801"
+DEFAULT_API_BASE_URL = "http://localhost:37804"
 API_ENDPOINT = "/api/aminer/scholar/detail"
 
 # Data source identifier
@@ -104,14 +104,14 @@ def fetch_scholar_from_api(
         signature: X-Signature header value
         timestamp: X-Timestamp header value
         force_refresh: Force refresh cache
-        retry: Whether to retry on failure
+        retry: Whether to retry on failure (will retry up to 5 times)
         retry_delay: Delay in seconds before retry
 
     Returns:
         API response containing data and enriched fields
 
     Raises:
-        requests.RequestException: If API call fails after retry
+        requests.RequestException: If API call fails after all retries
     """
     url = f"{api_base_url}{API_ENDPOINT}"
 
@@ -126,24 +126,28 @@ def fetch_scholar_from_api(
         "force_refresh": "true" if force_refresh else "false",
     }
 
-    try:
-        response = requests.get(url, headers=headers, params=params, timeout=60)
-        response.raise_for_status()
-        return response.json()
-    except requests.RequestException as e:
-        if not retry:
-            raise
+    max_attempts = 6 if retry else 1
+    last_exception = None
 
-        # First attempt failed, retry after delay
-        print(f"       {Colors.YELLOW}⚠ API request failed, retrying in {retry_delay}s...{Colors.ENDC}")
-        print(f"       {Colors.DIM}Error: {str(e)}{Colors.ENDC}")
-        time.sleep(retry_delay)
+    for attempt in range(1, max_attempts + 1):
+        try:
+            if attempt > 1:
+                print(f"       {Colors.CYAN}↻ Retry attempt {attempt - 1}/{max_attempts - 1}...{Colors.ENDC}")
 
-        # Retry once
-        print(f"       {Colors.CYAN}↻ Retrying...{Colors.ENDC}")
-        response = requests.get(url, headers=headers, params=params, timeout=60)
-        response.raise_for_status()
-        return response.json()
+            response = requests.get(url, headers=headers, params=params, timeout=60)
+            response.raise_for_status()
+            return response.json()
+
+        except requests.RequestException as e:
+            last_exception = e
+
+            if attempt < max_attempts:
+                print(f"       {Colors.YELLOW}⚠ API request failed (attempt {attempt}/{max_attempts}), retrying in {retry_delay}s...{Colors.ENDC}")
+                print(f"       {Colors.DIM}Error: {str(e)}{Colors.ENDC}")
+                time.sleep(retry_delay)
+            else:
+                # All attempts exhausted
+                raise last_exception
 
 
 def convert_api_to_aminer_format(api_response: dict, aminer_id: str) -> dict:
