@@ -72,6 +72,8 @@ async def startup_event():
     logger.info(f"  - Host: {settings.host}:{settings.port}")
     logger.info(f"  - Cache Dir: {settings.cache_dir}")
     logger.info(f"  - AMiner Cache TTL: {settings.aminer_cache_ttl}s ({settings.aminer_cache_ttl / 86400:.0f} days)")
+    logger.info(f"  - Avatar Cache TTL: {settings.avatar_cache_ttl}s ({settings.avatar_cache_ttl / 86400:.0f} days)")
+    logger.info(f"  - Email Cache TTL: {settings.email_cache_ttl}s ({settings.email_cache_ttl / 86400:.0f} days)")
     logger.info(f"  - CORS Origins: {settings.cors_origins}")
     logger.info(f"  - Log Level: {settings.log_level}")
     logger.info("Service started successfully")

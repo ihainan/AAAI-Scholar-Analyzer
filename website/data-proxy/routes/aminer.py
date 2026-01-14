@@ -11,6 +11,7 @@ from fastapi.responses import Response
 from config import settings
 from services.aminer_service import get_scholar_detail
 from services.avatar_service import get_scholar_avatar
+from services.email_service import get_scholar_email_image
 from services.cache_service import clear_cache_directory
 
 logger = logging.getLogger(__name__)
@@ -96,6 +97,71 @@ async def get_scholar_avatar_endpoint(
 
     try:
         image_bytes, content_type = await get_scholar_avatar(id, force_refresh)
+        return Response(content=image_bytes, media_type=content_type)
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except Exception as e:
+        logger.error(f"[API Request] Unexpected error for scholar {id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/scholar/email")
+async def get_scholar_email_endpoint(
+    id: str = Query(..., description="AMiner scholar ID"),
+    authorization: Optional[str] = Header(None, description="AMiner authorization token"),
+    x_signature: Optional[str] = Header(None, alias="X-Signature", description="AMiner API signature"),
+    x_timestamp: Optional[str] = Header(None, alias="X-Timestamp", description="AMiner API timestamp"),
+    force_refresh: bool = Query(False, description="Force refresh cache"),
+):
+    """
+    Get scholar email image with caching.
+
+    This endpoint fetches email images from AMiner's getPerson API. The email field
+    contains a path to an image endpoint that renders the email address as an image
+    to prevent scraping.
+
+    The workflow is:
+    1. Read cached scholar detail data (from /api/aminer/scholar/detail)
+    2. Extract email image path from cached data
+    3. Fetch email image from AMiner (if not cached)
+    4. Cache the image for 30 days
+
+    Headers required:
+    - Authorization: AMiner bearer token
+    - X-Signature: Request signature
+    - X-Timestamp: Request timestamp
+
+    Query parameters:
+    - id: Scholar AMiner ID (required)
+    - force_refresh: Force refresh cache (optional, default: false)
+
+    Returns:
+        Image binary data (PNG, JPEG, etc.)
+
+    Raises:
+        400: Invalid email path format
+        404: Scholar data not cached or no email available
+        500: Failed to read cached data
+        502: Failed to fetch from AMiner
+    """
+    logger.info(f"[API Request] GET /aminer/scholar/email - Scholar ID: {id}, Force Refresh: {force_refresh}")
+
+    # Validate required headers
+    if not authorization:
+        logger.warning(f"[API Request] Missing Authorization header for scholar {id}")
+        raise HTTPException(status_code=400, detail="Authorization header is required")
+    if not x_signature:
+        logger.warning(f"[API Request] Missing X-Signature header for scholar {id}")
+        raise HTTPException(status_code=400, detail="X-Signature header is required")
+    if not x_timestamp:
+        logger.warning(f"[API Request] Missing X-Timestamp header for scholar {id}")
+        raise HTTPException(status_code=400, detail="X-Timestamp header is required")
+
+    try:
+        image_bytes, content_type = await get_scholar_email_image(
+            id, authorization, x_signature, x_timestamp, force_refresh
+        )
         return Response(content=image_bytes, media_type=content_type)
     except HTTPException:
         # Re-raise HTTP exceptions as-is

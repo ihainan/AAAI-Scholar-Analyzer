@@ -283,8 +283,15 @@ async def get_scholar_detail(
 
         cached_data = read_json_cache(cache_path)
         if cached_data:
-            logger.debug(f"[Cache] Cached response: {json.dumps(cached_data, ensure_ascii=False, indent=2)}")
-            return cached_data
+            # Handle both old format (direct response) and new format (with raw_response)
+            if "raw_response" in cached_data and "official_format" in cached_data:
+                # New format: return official_format
+                logger.debug(f"[Cache] Cached response (new format): {json.dumps(cached_data['official_format'], ensure_ascii=False, indent=2)}")
+                return cached_data["official_format"]
+            else:
+                # Old format: return as-is for backwards compatibility
+                logger.debug(f"[Cache] Cached response (old format): {json.dumps(cached_data, ensure_ascii=False, indent=2)}")
+                return cached_data
         else:
             logger.error(f"[Cache] Failed to read cache for {scholar_id}")
             logger.info(f"[Cache] Falling back to fetching fresh data")
@@ -325,9 +332,13 @@ async def get_scholar_detail(
         logger.debug(f"[Data Processing] Enriched fields: {json.dumps(enriched_fields, ensure_ascii=False, indent=2)}")
         official_response["enriched"] = enriched_fields
 
-    # Cache the response
-    if write_json_cache(cache_path, official_response):
-        logger.info(f"[Cache] Cached response for scholar {scholar_id} to: {cache_path}")
+    # Cache both raw response and official format
+    cache_data = {
+        "raw_response": web_response,
+        "official_format": official_response
+    }
+    if write_json_cache(cache_path, cache_data):
+        logger.info(f"[Cache] Cached raw response and official format for scholar {scholar_id} to: {cache_path}")
     else:
         logger.error(f"[Cache] Failed to cache response for {scholar_id}")
 

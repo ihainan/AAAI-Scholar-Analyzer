@@ -16,8 +16,9 @@ class Settings(BaseSettings):
 
     # Cache Configuration
     cache_dir: Path = Path("./cache")
-    aminer_cache_ttl: int = 1296000  # 15 days in seconds
+    aminer_cache_ttl: int = 2592000  # 30 days in seconds
     avatar_cache_ttl: int = 31536000  # 365 days in seconds (effectively permanent)
+    email_cache_ttl: int = 2592000  # 30 days in seconds (same as aminer_cache_ttl)
 
     # Firecrawl Configuration
     firecrawl_api_url: str = "https://firecrawl.ihainan.me/v1"
@@ -56,6 +57,11 @@ class Settings(BaseSettings):
         """Get avatar cache directory path."""
         return self.cache_dir / "avatars"
 
+    @property
+    def email_cache_dir(self) -> Path:
+        """Get email image cache directory path."""
+        return self.cache_dir / "emails"
+
 
 # Global settings instance
 settings = Settings()
@@ -63,3 +69,4 @@ settings = Settings()
 # Ensure cache directories exist
 settings.aminer_cache_dir.mkdir(parents=True, exist_ok=True)
 settings.avatar_cache_dir.mkdir(parents=True, exist_ok=True)
+settings.email_cache_dir.mkdir(parents=True, exist_ok=True)
