@@ -74,24 +74,48 @@ def load_labels_definition(labels_file: Path | None, labels_json: str | None) ->
 
 def get_validated_scholars(data: dict) -> list[dict]:
     """
-    Extract scholars with validated AMiner IDs from the data.
+    Extract scholars from input data supporting both 'talents' (scholars.json)
+    and 'authors' (authors.json) formats.
 
-    Returns only scholars where:
-    - aminer_validation.status == "success"
-    - aminer_validation.is_same_person == True
-    - aminer_id exists and is not empty/failed
+    Behavior:
+    - If an entry has 'aminer_validation', require status == "success" and is_same_person is True.
+    - Otherwise, if an entry has a non-empty aminer_id (and not "failed"), include it (best-effort).
     """
     scholars = []
-    for talent in data.get("talents", []):
-        validation = talent.get("aminer_validation", {})
-        aminer_id = talent.get("aminer_id", "")
 
-        if (validation.get("status") == "success" and
-            validation.get("is_same_person") is True and
-            aminer_id and aminer_id != "failed"):
-            scholars.append(talent)
+    # Support both formats: prefer 'talents' (scholars.json) but fall back to 'authors'
+    entries = data.get("talents") or data.get("authors") or []
+
+    for entry in entries:
+        validation = entry.get("aminer_validation")
+        aminer_id = entry.get("aminer_id", "")
+
+        if validation:
+            # Keep original strict validation behavior when metadata is present
+            if (validation.get("status") == "success" and
+                validation.get("is_same_person") is True and
+                aminer_id and aminer_id != "failed"):
+                scholars.append(entry)
+        else:
+            # Best-effort: include entries that have an AMiner ID even if no validation metadata
+            if aminer_id and aminer_id != "failed":
+                scholars.append(entry)
 
     return scholars
+
+
+def get_citation_count(entry: dict) -> int:
+    """Best-effort citation count used for prioritization (high to low)."""
+    value = entry.get("n_citation")
+    if value is None:
+        stats = entry.get("statistics")
+        if isinstance(stats, dict):
+            value = stats.get("n_citation")
+
+    try:
+        return int(value) if value is not None else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def truncate_list(items: list | None, max_items: int = 2) -> list | None:
@@ -260,7 +284,10 @@ async def label_scholar(
         permission_mode="bypassPermissions"
     )
 
-    result_text = ""
+    # NOTE: The SDK may emit multiple message types (AssistantMessage, ResultMessage, etc.).
+    # We collect all text blocks rather than overwriting `result_text`, and we ignore non-string
+    # `result` payloads to avoid clobbering the extracted answer.
+    result_chunks: list[str] = []
     formatter = MessageFormatter(indent="    ")
 
     try:
@@ -268,19 +295,30 @@ async def label_scholar(
             # Format and print each message
             formatter.print(message)
 
-            # Collect the result text from the agent's response
-            if hasattr(message, "result"):
-                result_text = message.result
-            elif hasattr(message, "content"):
+            # Some SDK message types may expose a final string result
+            if hasattr(message, "result") and isinstance(message.result, str):
+                if message.result.strip():
+                    result_chunks.append(message.result)
+
+            # Assistant content is typically a sequence of blocks (often tuple, not always list)
+            if hasattr(message, "content"):
                 if isinstance(message.content, str):
-                    result_text = message.content
-                elif isinstance(message.content, list):
+                    if message.content.strip():
+                        result_chunks.append(message.content)
+                elif isinstance(message.content, (list, tuple)):
                     for block in message.content:
-                        if hasattr(block, "text"):
-                            result_text = block.text
+                        # TextBlock objects
+                        if hasattr(block, "text") and isinstance(block.text, str):
+                            if block.text.strip():
+                                result_chunks.append(block.text)
+                        # Dict-style blocks
+                        elif isinstance(block, dict) and isinstance(block.get("text"), str):
+                            if block["text"].strip():
+                                result_chunks.append(block["text"])
     except Exception as e:
         return {"status": "error", "error": f"Agent execution failed: {str(e)}"}
 
+    result_text = "\n".join(result_chunks).strip()
     return parse_agent_result(result_text)
 
 
@@ -396,9 +434,9 @@ async def process_scholars(
     print(f"Loading JSON file: {json_file_path}")
     data = load_json_file(json_file_path)
 
-    # Get validated scholars
+    # Get scholars to process (supports both validated 'talents' entries and best-effort 'authors' entries)
     scholars = get_validated_scholars(data)
-    print(f"Found {len(scholars)} scholars with validated AMiner IDs")
+    print(f"Found {len(scholars)} scholars with usable AMiner IDs")
 
     # Filter to only those with enriched data
     enriched_scholars = []
@@ -415,6 +453,9 @@ async def process_scholars(
     if target_ids:
         scholars = [s for s in scholars if s.get("aminer_id") in target_ids]
         print(f"Filtered to {len(scholars)} scholars matching target IDs")
+
+    # Sort by citation count (high to low), so we prioritize high-impact scholars first
+    scholars.sort(key=get_citation_count, reverse=True)
 
     # Track statistics
     label_names = [label["name"] for label in labels_definition.get("labels", [])]
