@@ -32,6 +32,7 @@ export interface Conference {
 
 export interface ScholarBasic {
   name: string;
+  name_zh?: string;
   affiliation?: string;
   roles: string[];
   aminer_id?: string;
@@ -110,6 +111,7 @@ export interface AcademicIndices {
 
 export interface ScholarDetail {
   name: string;
+  name_zh?: string;
   aliases?: string[];
   affiliation?: string;
   roles: string[];

@@ -26,6 +26,11 @@ function getInitials(name: string): string {
     .slice(0, 2);
 }
 
+function formatScholarName(name: string, name_zh?: string): string {
+  // If Chinese name exists, append it in parentheses
+  return name_zh ? `${name} (${name_zh})` : name;
+}
+
 export default function ScholarCard({ scholar, conferenceId, showMetrics = false, fromPage }: ScholarCardProps) {
   const searchParam = scholar.aminer_id
     ? `aminer_id=${scholar.aminer_id}`
@@ -68,7 +73,7 @@ export default function ScholarCard({ scholar, conferenceId, showMetrics = false
         )}
       </div>
       <div className="scholar-card-content">
-        <h3 className="scholar-card-name">{scholar.name}</h3>
+        <h3 className="scholar-card-name">{formatScholarName(scholar.name, scholar.name_zh)}</h3>
         {scholar.roles && scholar.roles.length > 0 && (
           <p className="scholar-card-roles">{scholar.roles.join(', ')}</p>
         )}

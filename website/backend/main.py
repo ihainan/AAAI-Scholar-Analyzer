@@ -222,6 +222,7 @@ class ConferenceMeta(BaseModel):
 
 class ScholarBasic(BaseModel):
     name: str
+    name_zh: Optional[str] = None
     affiliation: Optional[str] = None
     roles: list[str] = []
     aminer_id: Optional[str] = None
@@ -291,6 +292,7 @@ class AcademicIndices(BaseModel):
 class ScholarDetail(BaseModel):
     # Basic info from scholars.json
     name: str
+    name_zh: Optional[str] = None
     aliases: Optional[list[str]] = None
     affiliation: Optional[str] = None
     roles: list[str] = []
@@ -400,8 +402,20 @@ def get_conference_scholars(conference_id: str):
         aminer_id = talent.get("aminer_id")
         photo_url = get_scholar_photo(aminer_id)
 
+        # Try to get Chinese name from AMiner data
+        name_zh = None
+        if aminer_id:
+            aminer_path = settings.aminer_scholars_dir / f"{aminer_id}.json"
+            if aminer_path.exists():
+                try:
+                    aminer_data = load_json_file(str(aminer_path))
+                    name_zh = aminer_data.get("detail", {}).get("name_zh")
+                except Exception:
+                    pass
+
         scholars.append(ScholarBasic(
             name=talent.get("name", "Unknown"),
+            name_zh=name_zh,
             affiliation=talent.get("affiliation"),
             roles=talent.get("roles", []),
             aminer_id=aminer_id,
@@ -452,11 +466,23 @@ def get_conference_authors(conference_id: str):
     try:
         authors_data = load_json_file(str(authors_path))
 
-        # Add photo_url for each author (prioritizing local avatars)
+        # Add photo_url and name_zh for each author (prioritizing local avatars)
         authors = authors_data.get("authors", [])
         for author in authors:
             aminer_id = author.get("aminer_id")
             author["photo_url"] = get_scholar_photo(aminer_id)
+
+            # Try to get Chinese name from AMiner data
+            if aminer_id:
+                aminer_path = settings.aminer_scholars_dir / f"{aminer_id}.json"
+                if aminer_path.exists():
+                    try:
+                        aminer_data = load_json_file(str(aminer_path))
+                        name_zh = aminer_data.get("detail", {}).get("name_zh")
+                        if name_zh:
+                            author["name_zh"] = name_zh
+                    except Exception:
+                        pass
 
         return authors_data
     except Exception as e:
@@ -570,6 +596,7 @@ def build_scholar_detail(talent: dict, aminer_id: Optional[str], conference_id: 
                 aminer_data = load_json_file(str(aminer_path))
                 aminer_detail = aminer_data.get("detail", {})
 
+                detail.name_zh = aminer_detail.get("name_zh")
                 detail.bio = aminer_detail.get("bio")
                 detail.education = aminer_detail.get("edu")
                 detail.position = aminer_detail.get("position")
@@ -877,8 +904,21 @@ def filter_scholars_by_labels(
         for talent in talents:
             aminer_id = talent.get("aminer_id")
             photo_url = get_scholar_photo(aminer_id)
+
+            # Try to get Chinese name from AMiner data
+            name_zh = None
+            if aminer_id:
+                aminer_path = settings.aminer_scholars_dir / f"{aminer_id}.json"
+                if aminer_path.exists():
+                    try:
+                        aminer_data = load_json_file(str(aminer_path))
+                        name_zh = aminer_data.get("detail", {}).get("name_zh")
+                    except Exception:
+                        pass
+
             scholars.append(ScholarBasic(
                 name=talent.get("name", "Unknown"),
+                name_zh=name_zh,
                 affiliation=talent.get("affiliation"),
                 roles=talent.get("roles", []),
                 aminer_id=aminer_id,
@@ -920,8 +960,20 @@ def filter_scholars_by_labels(
 
             if all_match:
                 photo_url = get_scholar_photo(aminer_id)
+
+                # Try to get Chinese name from AMiner data
+                name_zh = None
+                aminer_path = settings.aminer_scholars_dir / f"{aminer_id}.json"
+                if aminer_path.exists():
+                    try:
+                        aminer_data = load_json_file(str(aminer_path))
+                        name_zh = aminer_data.get("detail", {}).get("name_zh")
+                    except Exception:
+                        pass
+
                 filtered_scholars.append(ScholarBasic(
                     name=talent.get("name", "Unknown"),
+                    name_zh=name_zh,
                     affiliation=talent.get("affiliation"),
                     roles=talent.get("roles", []),
                     aminer_id=aminer_id,

@@ -36,6 +36,11 @@ function parseAdditionalInfo(info: string): string[] {
     .map(entry => entry.endsWith('.') ? entry : entry + '.');
 }
 
+function formatScholarName(name: string, name_zh?: string): string {
+  // If Chinese name exists, append it in parentheses
+  return name_zh ? `${name} (${name_zh})` : name;
+}
+
 export default function ScholarDetail() {
   const { conferenceId } = useParams<{ conferenceId: string }>();
   const [searchParams] = useSearchParams();
@@ -128,7 +133,7 @@ export default function ScholarDetail() {
             <span className="separator">/</span>
           </>
         ) : null}
-        <span>{scholar.name}</span>
+        <span>{formatScholarName(scholar.name, scholar.name_zh)}</span>
       </nav>
 
       <div className="scholar-content">
@@ -182,7 +187,7 @@ export default function ScholarDetail() {
 
         <main className="scholar-main">
           <header className="scholar-header">
-            <h1>{scholar.name}</h1>
+            <h1>{formatScholarName(scholar.name, scholar.name_zh)}</h1>
             {scholar.labels && scholar.labels.results.length > 0 && (
               <div className="scholar-labels">
                 {scholar.labels.results

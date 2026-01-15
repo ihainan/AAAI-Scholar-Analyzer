@@ -82,6 +82,7 @@ export default function PeoplePage() {
           if (scholar.aminer_id) {
             mergedMap.set(scholar.aminer_id, {
               name: scholar.name,
+              name_zh: scholar.name_zh,
               aminer_id: scholar.aminer_id,
               affiliation: scholar.affiliation,
               roles: scholar.roles || [],
@@ -96,7 +97,7 @@ export default function PeoplePage() {
           if (author.aminer_id) {
             const existing = mergedMap.get(author.aminer_id);
             if (existing) {
-              // Merge data
+              // Merge data, preserving name_zh from existing if available
               mergedMap.set(author.aminer_id, {
                 ...existing,
                 paper_count: author.paper_count,
@@ -105,6 +106,8 @@ export default function PeoplePage() {
                 n_pubs: author.n_pubs,
                 affiliation: existing.affiliation || author.affiliation,
                 organization: (author as any).organization,
+                organization_zh: (author as any).organization_zh,
+                name_zh: existing.name_zh || (author as any).name_zh,
               });
             } else {
               mergedMap.set(author.aminer_id, {
@@ -144,11 +147,12 @@ export default function PeoplePage() {
   const filteredAndSortedPeople = useMemo(() => {
     let result = [...people];
 
-    // Filter by search term
+    // Filter by search term (search in both English and Chinese names)
     if (debouncedSearchTerm) {
       const term = debouncedSearchTerm.toLowerCase();
       result = result.filter(person =>
-        person.name.toLowerCase().includes(term)
+        person.name.toLowerCase().includes(term) ||
+        (person.name_zh && person.name_zh.includes(debouncedSearchTerm))
       );
     }
 
