@@ -6,13 +6,15 @@ This script:
 1. Loads scholars from authors.json and sorts by citation count
 2. Downloads email images (white background) from data-proxy API
 3. Uses PaddleOCR VL model to recognize email text
-4. Stores recognized emails in data/enriched/scholars/<aminer_id>.json
+4. Falls back to Qwen3-VL-Plus if PaddleOCR fails
+5. Stores recognized emails in data/enriched/scholars/<aminer_id>.json
 
 Features:
 - Skips scholars who already have email addresses
 - Uses local cache for email images
 - Respects rate limits with configurable delays
 - Supports testing with specific scholar IDs
+- Automatic fallback to Qwen3-VL-Plus for better accuracy
 
 Usage:
     # Process all scholars (sorted by citations, high to low)
@@ -28,9 +30,12 @@ Usage:
     python fetch_email_addresses.py --force-refresh
 
 Environment:
-    Set API credentials if needed:
+    Required - PaddleOCR API credentials:
     export PADDLE_OCR_API_URL="https://h0y2i794u98027ue.aistudio-app.com/layout-parsing"
     export PADDLE_OCR_TOKEN="your_token"
+
+    Optional - Qwen3-VL-Plus fallback (improves accuracy):
+    export DASHSCOPE_API_KEY="sk-xxx"
 """
 
 import argparse
@@ -51,6 +56,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 AUTHORS_FILE = PROJECT_ROOT / "data" / "aaai-26" / "authors.json"
 ENRICHED_DIR = PROJECT_ROOT / "data" / "enriched" / "scholars"
 EMAIL_IMG_DIR = PROJECT_ROOT / "data" / "aminer" / "email-imgs"
+SCHOLARS_DIR = PROJECT_ROOT / "data" / "aminer" / "scholars"
 
 # API Configuration
 DEFAULT_DATA_PROXY_URL = "http://localhost:37804"
@@ -60,6 +66,9 @@ DEFAULT_OCR_DELAY = 3.0  # OCR API is slower
 # OCR Configuration (must be set via environment variables)
 PADDLE_OCR_API_URL = None
 PADDLE_OCR_TOKEN = None
+
+# Qwen VL Configuration (fallback OCR)
+DASHSCOPE_API_KEY = None
 
 
 def load_sorted_scholar_ids() -> List[tuple[str, int]]:
@@ -101,6 +110,29 @@ def load_sorted_scholar_ids() -> List[tuple[str, int]]:
     except Exception as e:
         print(f"Error: Failed to load authors.json: {e}")
         sys.exit(1)
+
+
+def load_scholar_data(aminer_id: str) -> Optional[Dict]:
+    """Load scholar data from aminer/scholars directory."""
+    scholar_file = SCHOLARS_DIR / f"{aminer_id}.json"
+    if not scholar_file.exists():
+        return None
+
+    try:
+        with open(scholar_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Extract useful information
+        detail = data.get('detail', {})
+        return {
+            'name': detail.get('name', ''),
+            'name_zh': detail.get('name_zh', ''),
+            'orgs': detail.get('orgs', []),
+            'position': detail.get('position', '')
+        }
+    except Exception as e:
+        print(f"    Warning: Failed to load scholar data: {e}")
+        return None
 
 
 def load_enriched_data(aminer_id: str) -> Optional[Dict]:
@@ -370,6 +402,161 @@ def recognize_email_with_ocr(
         }
 
 
+def recognize_email_with_qwen3_vl(
+    image_path: Path,
+    api_key: str,
+    scholar_info: Optional[Dict] = None
+) -> Dict[str, any]:
+    """
+    Recognize email text from image using Qwen3-VL-Plus model (fallback method).
+
+    Args:
+        image_path: Path to the email image
+        api_key: Dashscope API key
+        scholar_info: Optional dict with scholar's name, orgs, etc. for context
+
+    Returns:
+        Dictionary with:
+        - success: bool
+        - text: str (raw recognized text)
+        - emails: List[str] (extracted email addresses)
+        - message: str
+    """
+    try:
+        from openai import OpenAI
+
+        # Read and encode image to base64
+        with open(image_path, 'rb') as f:
+            image_bytes = f.read()
+
+        image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+
+        # Determine MIME type
+        if image_path.suffix.lower() == '.png':
+            mime_type = 'image/png'
+        elif image_path.suffix.lower() in ['.jpg', '.jpeg']:
+            mime_type = 'image/jpeg'
+        else:
+            mime_type = 'image/png'
+
+        image_data_url = f"data:{mime_type};base64,{image_base64}"
+
+        # Create OpenAI client with Aliyun endpoint
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1"
+        )
+
+        # Build context information
+        context_info = ""
+        if scholar_info:
+            context_parts = []
+
+            # Add name
+            if scholar_info.get('name'):
+                name_part = f"学者姓名：{scholar_info['name']}"
+                if scholar_info.get('name_zh'):
+                    name_part += f"（{scholar_info['name_zh']}）"
+                context_parts.append(name_part)
+
+            # Add organizations
+            if scholar_info.get('orgs'):
+                orgs_text = "；".join(scholar_info['orgs'])
+                context_parts.append(f"所属机构：{orgs_text}")
+
+            # Add position
+            if scholar_info.get('position'):
+                context_parts.append(f"职位：{scholar_info['position']}")
+
+            if context_parts:
+                context_info = "\n\n背景信息（仅供参考，用于推断邮箱地址的合理性）：\n" + "\n".join(context_parts) + "\n"
+
+        # Improved prompt for better accuracy
+        improved_prompt = f"""请仔细识别这张图片中的英文邮箱地址。
+{context_info}
+要求：
+1. 仔细观察图片中的每个字符，特别注意容易混淆的字符（如 l 和 i、0 和 O、1 和 l、t 和 f 等）
+2. 识别所有的邮箱地址，多个邮箱地址用英文分号（;）分隔
+3. 验证每个邮箱地址的格式是否正确（格式：username@domain）
+4. 特别注意域名部分的拼写，确保常见的大学、公司域名拼写正确（如 tsinghua、rutgers、microsoft、gmail、ust.hk 等）
+5. 邮箱的用户名部分通常与学者姓名相关（如姓名缩写、全拼等），请结合背景信息验证合理性
+6. 逐个检查识别结果，确认每个字符是否准确
+7. 如果某个字符不太清晰，请根据背景信息、上下文和常见邮箱格式推断
+
+请先思考识别过程，然后在最后一行输出最终的识别结果（只输出邮箱地址，不要包含任何其他解释）。"""
+
+        # Call Qwen3-VL-Plus API
+        completion = client.chat.completions.create(
+            model="qwen3-vl-plus",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": image_data_url}
+                    },
+                    {
+                        "type": "text",
+                        "text": improved_prompt
+                    }
+                ]
+            }],
+            temperature=0.1,  # Lower temperature for more deterministic output
+            timeout=60.0
+        )
+
+        # Get response
+        raw_text = completion.choices[0].message.content
+
+        if not raw_text:
+            return {
+                "success": False,
+                "text": "",
+                "emails": [],
+                "message": "Empty response from Qwen3-VL"
+            }
+
+        # Extract the last line as the final result
+        lines = raw_text.strip().split('\n')
+        final_line = lines[-1].strip()
+
+        # Clean and normalize the final line
+        cleaned_text = normalize_email_text(final_line)
+
+        # Extract email addresses
+        emails = extract_emails(cleaned_text)
+
+        if not emails:
+            return {
+                "success": False,
+                "text": cleaned_text,
+                "emails": [],
+                "message": "No email addresses found in Qwen3-VL output"
+            }
+
+        return {
+            "success": True,
+            "text": cleaned_text,
+            "emails": emails,
+            "message": f"Found {len(emails)} email(s) with Qwen3-VL"
+        }
+
+    except ImportError:
+        return {
+            "success": False,
+            "text": "",
+            "emails": [],
+            "message": "OpenAI package not installed (required for Qwen3-VL)"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "text": "",
+            "emails": [],
+            "message": f"Qwen3-VL error: {str(e)}"
+        }
+
+
 def normalize_email_text(text: str) -> str:
     """
     Normalize OCR text to fix common recognition issues.
@@ -512,10 +699,11 @@ def main():
 
     # Load configuration from environment variables
     import os
-    global PADDLE_OCR_API_URL, PADDLE_OCR_TOKEN
+    global PADDLE_OCR_API_URL, PADDLE_OCR_TOKEN, DASHSCOPE_API_KEY
 
     PADDLE_OCR_API_URL = os.environ.get("PADDLE_OCR_API_URL")
     PADDLE_OCR_TOKEN = os.environ.get("PADDLE_OCR_TOKEN")
+    DASHSCOPE_API_KEY = os.environ.get("DASHSCOPE_API_KEY")
 
     if not PADDLE_OCR_API_URL or not PADDLE_OCR_TOKEN:
         print("Error: PaddleOCR API credentials required")
@@ -525,6 +713,12 @@ def main():
         print("  export PADDLE_OCR_TOKEN='your_token'")
         print()
         sys.exit(1)
+
+    # Qwen3-VL is optional (fallback)
+    if DASHSCOPE_API_KEY:
+        print("Info: Qwen3-VL-Plus fallback is enabled (DASHSCOPE_API_KEY found)")
+    else:
+        print("Info: Qwen3-VL-Plus fallback is disabled (DASHSCOPE_API_KEY not set)")
 
     # Load AMiner credentials from environment variables if not provided via command line
     if not args.aminer_auth:
@@ -598,6 +792,9 @@ def main():
                 stats["skipped_has_email"] += 1
                 continue
 
+            # Load scholar data for context (used in Qwen3-VL fallback)
+            scholar_info = load_scholar_data(aminer_id)
+
             # Step 1: Download email image
             print(f"  [1/3] Downloading email image...")
             download_result = download_email_image(
@@ -656,14 +853,36 @@ def main():
                 print(f"      ✗ {ocr_result['message']}")
                 if ocr_result["text"]:
                     print(f"      Raw text: {ocr_result['text']}")
-                stats["ocr_failed"] += 1
-                time.sleep(args.ocr_delay)
-                continue
 
-            print(f"      ✓ {ocr_result['message']}")
-            print(f"      Text: {ocr_result['text']}")
-            print(f"      Emails: {', '.join(ocr_result['emails'])}")
-            stats["ocr_success"] += 1
+                # Try fallback: Qwen3-VL-Plus
+                if DASHSCOPE_API_KEY:
+                    print(f"      [Fallback] Trying Qwen3-VL-Plus...")
+                    qwen_result = recognize_email_with_qwen3_vl(
+                        image_path, DASHSCOPE_API_KEY, scholar_info
+                    )
+
+                    if qwen_result["success"]:
+                        # Qwen3-VL succeeded, use its result
+                        print(f"      ✓ {qwen_result['message']}")
+                        print(f"      Text: {qwen_result['text']}")
+                        print(f"      Emails: {', '.join(qwen_result['emails'])}")
+                        ocr_result = qwen_result  # Replace with Qwen result
+                        stats["ocr_success"] += 1
+                    else:
+                        print(f"      ✗ {qwen_result['message']}")
+                        stats["ocr_failed"] += 1
+                        time.sleep(args.ocr_delay)
+                        continue
+                else:
+                    # No fallback available
+                    stats["ocr_failed"] += 1
+                    time.sleep(args.ocr_delay)
+                    continue
+            else:
+                print(f"      ✓ {ocr_result['message']}")
+                print(f"      Text: {ocr_result['text']}")
+                print(f"      Emails: {', '.join(ocr_result['emails'])}")
+                stats["ocr_success"] += 1
 
             # Step 3: Save to enriched data
             print(f"  [3/3] Saving to enriched data...")
