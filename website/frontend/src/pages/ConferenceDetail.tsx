@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useSearchParams } from 'react-router-dom';
-import { getConferences, getConferenceScholars, getLabelsConfig, filterScholarsByLabels } from '../api';
+import { getConferences, getConferenceScholars, getLabelsConfig, filterScholarsByLabels, downloadExcel } from '../api';
 import ScholarCard from '../components/ScholarCard';
 import type { Conference, ScholarBasic, LabelDefinition } from '../types';
 import './ConferenceDetail.css';
@@ -63,6 +63,7 @@ export default function ConferenceDetail() {
   const [filteredScholars, setFilteredScholars] = useState<ScholarBasic[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterLoading, setFilterLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [labelDefinitions, setLabelDefinitions] = useState<LabelDefinition[]>([]);
   const [showFilterModal, setShowFilterModal] = useState(false);
@@ -159,6 +160,13 @@ export default function ConferenceDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conferenceId]);
 
+  // Update page title when conference data is loaded
+  useEffect(() => {
+    if (conference) {
+      document.title = `${conference.shortName || conference.name} - Academic Conferences`;
+    }
+  }, [conference]);
+
   const openFilterModal = () => {
     setTempFilters({ ...filters });
     setShowFilterModal(true);
@@ -175,6 +183,20 @@ export default function ConferenceDetail() {
       resetFilters[label.name] = 'any';
     });
     setTempFilters(resetFilters);
+  };
+
+  const handleExportData = async () => {
+    if (!conferenceId || exportLoading) return;
+
+    setExportLoading(true);
+    try {
+      await downloadExcel(conferenceId);
+    } catch (err) {
+      console.error('Error exporting data:', err);
+      alert('Failed to export data. Please try again.');
+    } finally {
+      setExportLoading(false);
+    }
   };
 
   if (loading) {
@@ -238,6 +260,18 @@ export default function ConferenceDetail() {
               >
                 Scholars
               </Link>
+              <button
+                className="conference-link export-link"
+                onClick={handleExportData}
+                disabled={exportLoading}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                {exportLoading ? 'Exporting...' : 'Export to Excel'}
+              </button>
             </div>
           )}
           {!(conference.urls && conference.urls.length > 0) && (
@@ -248,6 +282,18 @@ export default function ConferenceDetail() {
               >
                 Scholars
               </Link>
+              <button
+                className="conference-link export-link"
+                onClick={handleExportData}
+                disabled={exportLoading}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                {exportLoading ? 'Exporting...' : 'Export to Excel'}
+              </button>
             </div>
           )}
           {conference.tags && conference.tags.length > 0 && (

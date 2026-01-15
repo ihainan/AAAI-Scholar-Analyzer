@@ -87,3 +87,17 @@ export async function filterPeopleByLabels(
     `/api/conferences/${conferenceId}/people/filter?${searchParams.toString()}`
   );
 }
+
+export function getExportExcelUrl(conferenceId: string): string {
+  return `${API_BASE_URL}/api/conferences/${conferenceId}/export/excel`;
+}
+
+export async function downloadExcel(conferenceId: string): Promise<void> {
+  const url = getExportExcelUrl(conferenceId);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${conferenceId}_export.xlsx`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}

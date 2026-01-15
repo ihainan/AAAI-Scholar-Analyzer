@@ -14,6 +14,7 @@ import json
 import logging
 from datetime import datetime
 from functools import lru_cache
+from io import BytesIO
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -21,7 +22,10 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import FastAPI, HTTPException, Query, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.utils import get_column_letter
 from pydantic import BaseModel
 
 from config import settings
@@ -1157,6 +1161,440 @@ def filter_scholars_by_labels(
             continue
 
     return filtered_scholars
+
+
+def clean_excel_value(value):
+    """
+    Clean value for Excel export.
+    Remove characters that are not allowed in Excel cells.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return value
+
+    # Remove control characters (except tab, newline, carriage return)
+    # Excel doesn't allow characters with ASCII codes 0-31 except 9, 10, 13
+    cleaned = ""
+    for char in value:
+        code = ord(char)
+        if code >= 32 or code in (9, 10, 13):
+            cleaned += char
+
+    # Replace HTML line breaks with newlines
+    cleaned = cleaned.replace("<br><br>", "\n\n")
+    cleaned = cleaned.replace("<br>", "\n")
+
+    return cleaned
+
+
+def collect_person_data(person: dict, conference_id: str, role: str = None) -> dict:
+    """
+    Collect comprehensive data for a person (scholar or author).
+
+    Args:
+        person: Basic person data from scholars.json or authors.json
+        conference_id: Conference ID
+        role: Role string (for scholars) or None (will use "Paper Author" for authors)
+
+    Returns:
+        Dictionary with all person data for Excel export
+    """
+    aminer_id = person.get("aminer_id")
+    data = {
+        "name": person.get("name", ""),
+        "name_zh": None,
+        "role": role if role else "Paper Author",
+        "first_org_en": None,
+        "first_org_zh": None,
+        "all_orgs_en": None,
+        "all_orgs_zh": None,
+        "bio_en": None,
+        "bio_zh": None,
+        "position_en": None,
+        "position_zh": None,
+        "education_en": None,
+        "education_zh": None,
+        "homepage": None,
+        "google_scholar": None,
+        "aminer_id": aminer_id or "",
+        "dblp": None,
+        "website_url": f"https://scholar.ihainan.me/conference/{conference_id}/scholar?aminer_id={aminer_id}&from=people" if aminer_id else "",
+        "hindex": None,
+        "gindex": None,
+        "citations": None,
+        "pubs": None,
+        "activity": None,
+        "diversity": None,
+        "sociability": None,
+        "first_email": None,
+        "all_emails": None,
+        "research_tags": None,
+        "labels": {}
+    }
+
+    # Load AMiner data
+    if aminer_id:
+        aminer_path = settings.aminer_scholars_dir / f"{aminer_id}.json"
+        if aminer_path.exists():
+            try:
+                aminer_data = load_json_file(str(aminer_path))
+                detail = aminer_data.get("detail", {})
+
+                data["name_zh"] = detail.get("name_zh")
+                data["bio_en"] = detail.get("bio")
+                data["bio_zh"] = detail.get("bio_zh")
+                data["position_en"] = detail.get("position")
+                data["position_zh"] = detail.get("position_zh")
+                data["education_en"] = detail.get("edu")
+                data["education_zh"] = detail.get("edu_zh")
+
+                # Parse organizations
+                orgs = detail.get("orgs", [])
+                org_zhs = detail.get("org_zhs", [])
+                if orgs and len(orgs) > 0:
+                    all_orgs = orgs[0]
+                    data["all_orgs_en"] = all_orgs
+                    # Split by semicolon to get first org
+                    if ";" in all_orgs:
+                        data["first_org_en"] = all_orgs.split(";")[0].strip()
+                    else:
+                        data["first_org_en"] = all_orgs
+
+                if org_zhs and len(org_zhs) > 0:
+                    all_orgs_zh = org_zhs[0]
+                    data["all_orgs_zh"] = all_orgs_zh
+                    if ";" in all_orgs_zh:
+                        data["first_org_zh"] = all_orgs_zh.split(";")[0].strip()
+                    else:
+                        data["first_org_zh"] = all_orgs_zh
+            except Exception as e:
+                logger.error(f"Error loading AMiner data for {aminer_id}: {e}")
+
+        # Load enriched data
+        enriched_path = settings.enriched_scholars_dir / f"{aminer_id}.json"
+        if enriched_path.exists():
+            try:
+                enriched_data = load_json_file(str(enriched_path))
+
+                data["homepage"] = enriched_data.get("homepage")
+                data["google_scholar"] = enriched_data.get("google_scholar")
+                data["dblp"] = enriched_data.get("dblp")
+
+                # Parse emails
+                email = enriched_data.get("email")
+                if email:
+                    data["all_emails"] = email
+                    if ";" in email:
+                        data["first_email"] = email.split(";")[0].strip()
+                    else:
+                        data["first_email"] = email
+
+                # Academic indices
+                indices = enriched_data.get("indices", {})
+                data["hindex"] = indices.get("hindex")
+                data["gindex"] = indices.get("gindex")
+                data["citations"] = indices.get("citations")
+                data["pubs"] = indices.get("pubs")
+                data["activity"] = indices.get("activity")
+                data["diversity"] = indices.get("diversity")
+                data["sociability"] = indices.get("sociability")
+
+                # Research tags
+                research_tags = enriched_data.get("research_tags", [])
+                if research_tags:
+                    data["research_tags"] = ", ".join(research_tags)
+
+                # Labels
+                labels_data = enriched_data.get("labels", {})
+                results = labels_data.get("results", [])
+                for result in results:
+                    label_name = result.get("name")
+                    if label_name:
+                        data["labels"][label_name] = {
+                            "value": result.get("value"),
+                            "confidence": result.get("confidence"),
+                            "reason": result.get("reason")
+                        }
+            except Exception as e:
+                logger.error(f"Error loading enriched data for {aminer_id}: {e}")
+
+    return data
+
+
+def create_excel_export(conference_id: str) -> BytesIO:
+    """
+    Create Excel file with conference scholars and authors data.
+
+    Args:
+        conference_id: Conference ID
+
+    Returns:
+        BytesIO object containing the Excel file
+    """
+    conference_dir = settings.data_dir / conference_id
+
+    if not conference_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Conference not found: {conference_id}")
+
+    # Load label definitions
+    labels_config = []
+    if settings.labels_config_path.exists():
+        try:
+            labels_data = load_json_file(str(settings.labels_config_path))
+            labels_config = labels_data.get("labels", [])
+        except Exception as e:
+            logger.error(f"Error loading labels config: {e}")
+
+    # Define base columns (name, width)
+    base_columns = [
+        ("编号", 8),
+        ("姓名（英文）", 20),
+        ("姓名（中文）", 15),
+        ("会议角色", 25),
+        ("所属机构（主要，英文）", 40),
+        ("所属机构（主要，中文）", 40),
+        ("所属机构（全部，英文）", 60),
+        ("所属机构（全部，中文）", 60),
+        ("个人简介（英文）", 80),
+        ("个人简介（中文）", 80),
+        ("职位/职称（英文）", 25),
+        ("职位/职称（中文）", 25),
+        ("教育经历（英文）", 80),
+        ("教育经历（中文）", 80),
+        ("个人主页", 50),
+        ("谷歌学术主页", 50),
+        ("AMiner ID", 30),
+        ("DBLP主页", 50),
+        ("网站个人主页", 80),
+        ("H指数", 12),
+        ("G指数", 12),
+        ("引用数", 12),
+        ("发表论文数", 10),
+        ("活跃度", 12),
+        ("多样性", 12),
+        ("社交度", 12),
+        ("邮箱（主要）", 35),
+        ("邮箱（全部）", 60),
+        ("研究方向", 80),
+    ]
+
+    # Add label columns
+    label_columns = []
+    for label_def in labels_config:
+        label_name = label_def.get("name", "")
+        label_columns.extend([
+            (f"{label_name}_value", 15),
+            (f"{label_name}_confidence", 15),
+            (f"{label_name}_reason", 80),
+        ])
+
+    all_columns = base_columns + label_columns
+
+    # Create workbook
+    wb = Workbook()
+    wb.remove(wb.active)  # Remove default sheet
+
+    # Define fonts
+    header_font = Font(name='等线', size=12, bold=True)
+    data_font = Font(name='等线', size=12)
+
+    # Process authors data first (will be first sheet)
+    authors_path = conference_dir / "authors.json"
+    authors_sheet_data = []
+    if authors_path.exists():
+        try:
+            authors_data = load_json_file(str(authors_path))
+            authors = authors_data.get("authors", [])
+
+            # Collect all author data
+            for author in authors:
+                person_data = collect_person_data(author, conference_id, "Paper Author")
+                authors_sheet_data.append(person_data)
+        except Exception as e:
+            logger.error(f"Error loading authors data: {e}")
+
+    # Sort authors by citations (descending)
+    authors_sheet_data.sort(key=lambda x: x.get("citations") or 0, reverse=True)
+
+    # Create Paper Authors sheet (first sheet)
+    if authors_sheet_data:
+        ws_authors = wb.create_sheet("Paper Authors", 0)
+
+        # Write header
+        for col_idx, (col_name, col_width) in enumerate(all_columns, start=1):
+            cell = ws_authors.cell(row=1, column=col_idx, value=col_name)
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            ws_authors.column_dimensions[get_column_letter(col_idx)].width = col_width
+
+        ws_authors.freeze_panes = "A2"  # Freeze header row
+
+        # Add auto filter to all columns
+        ws_authors.auto_filter.ref = f"A1:{get_column_letter(len(all_columns))}1"
+
+        # Write data
+        for row_idx, person_data in enumerate(authors_sheet_data, start=2):
+            row_data = [
+                row_idx - 1,  # 编号
+                person_data["name"],
+                person_data["name_zh"],
+                person_data["role"],
+                person_data["first_org_en"],
+                person_data["first_org_zh"],
+                person_data["all_orgs_en"],
+                person_data["all_orgs_zh"],
+                person_data["bio_en"],
+                person_data["bio_zh"],
+                person_data["position_en"],
+                person_data["position_zh"],
+                person_data["education_en"],
+                person_data["education_zh"],
+                person_data["homepage"],
+                person_data["google_scholar"],
+                person_data["aminer_id"],
+                person_data["dblp"],
+                person_data["website_url"],
+                person_data["hindex"],
+                person_data["gindex"],
+                person_data["citations"],
+                person_data["pubs"],
+                person_data["activity"],
+                person_data["diversity"],
+                person_data["sociability"],
+                person_data["first_email"],
+                person_data["all_emails"],
+                person_data["research_tags"],
+            ]
+
+            # Add label data
+            for label_def in labels_config:
+                label_name = label_def.get("name", "")
+                label_data = person_data["labels"].get(label_name, {})
+                row_data.extend([
+                    label_data.get("value"),
+                    label_data.get("confidence"),
+                    label_data.get("reason"),
+                ])
+
+            for col_idx, value in enumerate(row_data, start=1):
+                cleaned_value = clean_excel_value(value)
+                cell = ws_authors.cell(row=row_idx, column=col_idx, value=cleaned_value)
+                cell.font = data_font
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+
+    # Process scholars data
+    scholars_path = conference_dir / "scholars.json"
+    if scholars_path.exists():
+        try:
+            scholars_data = load_json_file(str(scholars_path))
+            talents = scholars_data.get("talents", [])
+
+            # Collect all scholar data
+            scholars_sheet_data = []
+            for talent in talents:
+                roles = talent.get("roles", [])
+                role = roles[0] if roles else ""
+                person_data = collect_person_data(talent, conference_id, role)
+                scholars_sheet_data.append(person_data)
+
+            # Sort scholars by citations (descending)
+            scholars_sheet_data.sort(key=lambda x: x.get("citations") or 0, reverse=True)
+
+            ws_scholars = wb.create_sheet("Conference Organizers")
+
+            # Write header
+            for col_idx, (col_name, col_width) in enumerate(all_columns, start=1):
+                cell = ws_scholars.cell(row=1, column=col_idx, value=col_name)
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                ws_scholars.column_dimensions[get_column_letter(col_idx)].width = col_width
+
+            ws_scholars.freeze_panes = "A2"  # Freeze header row
+
+            # Add auto filter to all columns
+            ws_scholars.auto_filter.ref = f"A1:{get_column_letter(len(all_columns))}1"
+
+            # Write data
+            for row_idx, person_data in enumerate(scholars_sheet_data, start=2):
+                row_data = [
+                    row_idx - 1,  # 编号
+                    person_data["name"],
+                    person_data["name_zh"],
+                    person_data["role"],
+                    person_data["first_org_en"],
+                    person_data["first_org_zh"],
+                    person_data["all_orgs_en"],
+                    person_data["all_orgs_zh"],
+                    person_data["bio_en"],
+                    person_data["bio_zh"],
+                    person_data["position_en"],
+                    person_data["position_zh"],
+                    person_data["education_en"],
+                    person_data["education_zh"],
+                    person_data["homepage"],
+                    person_data["google_scholar"],
+                    person_data["aminer_id"],
+                    person_data["dblp"],
+                    person_data["website_url"],
+                    person_data["hindex"],
+                    person_data["gindex"],
+                    person_data["citations"],
+                    person_data["pubs"],
+                    person_data["activity"],
+                    person_data["diversity"],
+                    person_data["sociability"],
+                    person_data["first_email"],
+                    person_data["all_emails"],
+                    person_data["research_tags"],
+                ]
+
+                # Add label data
+                for label_def in labels_config:
+                    label_name = label_def.get("name", "")
+                    label_data = person_data["labels"].get(label_name, {})
+                    row_data.extend([
+                        label_data.get("value"),
+                        label_data.get("confidence"),
+                        label_data.get("reason"),
+                    ])
+
+                for col_idx, value in enumerate(row_data, start=1):
+                    cleaned_value = clean_excel_value(value)
+                    cell = ws_scholars.cell(row=row_idx, column=col_idx, value=cleaned_value)
+                    cell.font = data_font
+                    cell.alignment = Alignment(vertical="top", wrap_text=True)
+        except Exception as e:
+            logger.error(f"Error processing scholars data: {e}")
+
+    # Save to BytesIO
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return output
+
+
+@app.get("/api/conferences/{conference_id}/export/excel")
+def export_conference_excel(conference_id: str):
+    """
+    Export conference scholars and authors data to Excel.
+    Returns an Excel file with two sheets: Conference Organizers and Paper Authors.
+    """
+    try:
+        excel_file = create_excel_export(conference_id)
+
+        return StreamingResponse(
+            excel_file,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={conference_id}_export.xlsx"
+            }
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating Excel export: {e}")
+        raise HTTPException(status_code=500, detail=f"Error creating Excel export: {str(e)}")
 
 
 @app.post("/api/cache/clear")
