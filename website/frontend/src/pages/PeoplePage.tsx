@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
-import { getConferences, API_BASE_URL } from '../api';
-import type { Conference, ScholarBasic } from '../types';
+import { getConferences, getLabelsConfig, filterPeopleByLabels } from '../api';
+import type { Conference, ScholarBasic, LabelDefinition } from '../types';
 import ScholarCard from '../components/ScholarCard';
 import './PeoplePage.css';
 
@@ -15,8 +15,34 @@ interface Person extends ScholarBasic {
 }
 
 type SortOption = 'citations' | 'papers' | 'hindex' | 'pubs' | 'name';
+type FilterValue = 'any' | 'true' | 'false';
 
 const ITEMS_PER_PAGE = 24;
+
+function parseFiltersFromUrl(searchParams: URLSearchParams): Record<string, FilterValue> {
+  const filters: Record<string, FilterValue> = {};
+  const labelsParam = searchParams.get('labels');
+  if (labelsParam) {
+    labelsParam.split(',').forEach(item => {
+      const [name, value] = item.split(':');
+      if (name && (value === 'true' || value === 'false')) {
+        filters[name] = value as FilterValue;
+      }
+    });
+  }
+  return filters;
+}
+
+function filtersToUrlParam(filters: Record<string, FilterValue>): string {
+  const parts = Object.entries(filters)
+    .filter(([, value]) => value !== 'any')
+    .map(([name, value]) => `${name}:${value}`);
+  return parts.join(',');
+}
+
+function hasActiveFilters(filters: Record<string, FilterValue>): boolean {
+  return Object.values(filters).some(v => v !== 'any');
+}
 
 // Debounce hook
 function useDebounce<T>(value: T, delay: number): T {
@@ -40,7 +66,6 @@ export default function PeoplePage() {
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [conference, setConference] = useState<Conference | null>(null);
-  const [people, setPeople] = useState<Person[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +74,57 @@ export default function PeoplePage() {
   const [sortBy, setSortBy] = useState<SortOption>((searchParams.get('sort') as SortOption) || 'citations');
   const [displayCount, setDisplayCount] = useState(ITEMS_PER_PAGE);
 
+  // Label filtering state
+  const [labelDefinitions, setLabelDefinitions] = useState<LabelDefinition[]>([]);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [filters, setFilters] = useState<Record<string, FilterValue>>({});
+  const [tempFilters, setTempFilters] = useState<Record<string, FilterValue>>({});
+  const [filterLoading, setFilterLoading] = useState(false);
+  const [filteredScholars, setFilteredScholars] = useState<Person[]>([]);
+
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
+
+  const applyFilters = async (newFilters: Record<string, FilterValue>) => {
+    if (!conferenceId) return;
+
+    // Update URL (use replace to avoid adding to history for filter changes)
+    const urlParam = filtersToUrlParam(newFilters);
+    const params = new URLSearchParams(searchParams);
+    if (urlParam) {
+      params.set('labels', urlParam);
+    } else {
+      params.delete('labels');
+    }
+    // Preserve search and sort params
+    if (debouncedSearchTerm) {
+      params.set('search', debouncedSearchTerm);
+    }
+    if (sortBy !== 'citations') {
+      params.set('sort', sortBy);
+    }
+    setSearchParams(params, { replace: true });
+
+    setFilters(newFilters);
+
+    setFilterLoading(true);
+    try {
+      // Convert filters to API format
+      const apiFilters: Record<string, boolean> = {};
+      Object.entries(newFilters).forEach(([name, value]) => {
+        if (value === 'true') apiFilters[name] = true;
+        else if (value === 'false') apiFilters[name] = false;
+      });
+
+      // Use the new people filter API that returns merged authors + scholars
+      const filtered = await filterPeopleByLabels(conferenceId, apiFilters);
+      setFilteredScholars(filtered as Person[]);
+    } catch (err) {
+      console.error('Error filtering people:', err);
+      setFilteredScholars([]);
+    } finally {
+      setFilterLoading(false);
+    }
+  };
 
   // Load data
   useEffect(() => {
@@ -59,67 +134,37 @@ export default function PeoplePage() {
       try {
         setLoading(true);
 
-        // Load conference info
-        const conferencesData = await getConferences();
+        // Load conference info and labels in parallel
+        const [conferencesData, labelsData] = await Promise.all([
+          getConferences(),
+          getLabelsConfig().catch(() => ({ version: '1.0', labels: [] })),
+        ]);
+
         const conf = conferencesData.find(c => c.id === conferenceId);
         setConference(conf || null);
 
-        // Load authors data from API
-        const authorsResponse = await fetch(`${API_BASE_URL}/api/conferences/${conferenceId}/authors`);
-        const authorsData = await authorsResponse.json();
-        const authors: Person[] = authorsData.authors || [];
+        setLabelDefinitions(labelsData.labels);
 
-        // Load scholars data from API
-        const scholarsResponse = await fetch(`${API_BASE_URL}/api/conferences/${conferenceId}/data/scholars`);
-        const scholarsData = await scholarsResponse.json();
-        const scholars: Person[] = scholarsData.talents || [];
+        // Initialize filters with label names
+        const initialFilters: Record<string, FilterValue> = {};
+        labelsData.labels.forEach(label => {
+          initialFilters[label.name] = 'any';
+        });
 
-        // Merge and deduplicate by aminer_id
-        const mergedMap = new Map<string, Person>();
-
-        // Add scholars first (they might have more complete info)
-        scholars.forEach(scholar => {
-          if (scholar.aminer_id) {
-            mergedMap.set(scholar.aminer_id, {
-              name: scholar.name,
-              name_zh: scholar.name_zh,
-              aminer_id: scholar.aminer_id,
-              affiliation: scholar.affiliation,
-              roles: scholar.roles || [],
-              photo_url: scholar.photo_url,
-              description: scholar.description,
-            });
+        // Apply URL filters (read current searchParams)
+        const currentSearchParams = new URLSearchParams(window.location.search);
+        const urlFilters = parseFiltersFromUrl(currentSearchParams);
+        Object.entries(urlFilters).forEach(([name, value]) => {
+          if (name in initialFilters) {
+            initialFilters[name] = value;
           }
         });
 
-        // Merge with authors (authors have metrics)
-        authors.forEach(author => {
-          if (author.aminer_id) {
-            const existing = mergedMap.get(author.aminer_id);
-            if (existing) {
-              // Merge data, preserving name_zh from existing if available
-              mergedMap.set(author.aminer_id, {
-                ...existing,
-                paper_count: author.paper_count,
-                h_index: author.h_index,
-                n_citation: author.n_citation,
-                n_pubs: author.n_pubs,
-                affiliation: existing.affiliation || author.affiliation,
-                organization: (author as any).organization,
-                organization_zh: (author as any).organization_zh,
-                name_zh: existing.name_zh || (author as any).name_zh,
-              });
-            } else {
-              mergedMap.set(author.aminer_id, {
-                ...author,
-                roles: author.roles || [],
-              });
-            }
-          }
-        });
+        setTempFilters(initialFilters);
 
-        const merged = Array.from(mergedMap.values());
-        setPeople(merged);
+        // Apply initial filters
+        await applyFilters(initialFilters);
+
         setError(null);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data');
@@ -129,6 +174,7 @@ export default function PeoplePage() {
     }
 
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conferenceId]);
 
   // Update URL when search/sort changes
@@ -140,12 +186,17 @@ export default function PeoplePage() {
     if (sortBy !== 'citations') {
       params.set('sort', sortBy);
     }
+    // Preserve labels param
+    const labelsParam = filtersToUrlParam(filters);
+    if (labelsParam) {
+      params.set('labels', labelsParam);
+    }
     setSearchParams(params, { replace: true });
-  }, [debouncedSearchTerm, sortBy, setSearchParams]);
+  }, [debouncedSearchTerm, sortBy, filters, setSearchParams]);
 
   // Filter and sort people
   const filteredAndSortedPeople = useMemo(() => {
-    let result = [...people];
+    let result = [...filteredScholars];
 
     // Filter by search term (search in both English and Chinese names)
     if (debouncedSearchTerm) {
@@ -175,7 +226,7 @@ export default function PeoplePage() {
     });
 
     return result;
-  }, [people, debouncedSearchTerm, sortBy]);
+  }, [filteredScholars, debouncedSearchTerm, sortBy]);
 
   const displayedPeople = filteredAndSortedPeople.slice(0, displayCount);
   const hasMore = displayCount < filteredAndSortedPeople.length;
@@ -192,6 +243,27 @@ export default function PeoplePage() {
   const handleSortChange = (newSort: SortOption) => {
     setSortBy(newSort);
     setDisplayCount(ITEMS_PER_PAGE);
+  };
+
+  const openFilterModal = () => {
+    setTempFilters({ ...filters });
+    setShowFilterModal(true);
+  };
+
+  const handleApplyFilter = async () => {
+    if (!conferenceId) return;
+
+    setShowFilterModal(false);
+    await applyFilters(tempFilters);
+    setDisplayCount(ITEMS_PER_PAGE);
+  };
+
+  const handleResetFilter = () => {
+    const resetFilters: Record<string, FilterValue> = {};
+    labelDefinitions.forEach(label => {
+      resetFilters[label.name] = 'any';
+    });
+    setTempFilters(resetFilters);
   };
 
   if (loading) {
@@ -257,6 +329,17 @@ export default function PeoplePage() {
         </div>
 
         <div className="controls-right">
+          <button
+            className={`filter-button ${hasActiveFilters(filters) ? 'active' : ''}`}
+            onClick={openFilterModal}
+            title="Filter people"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+            </svg>
+            Filter
+          </button>
+
           <div className="sort-control">
             <label htmlFor="sort-select">Sort by:</label>
             <select
@@ -279,7 +362,9 @@ export default function PeoplePage() {
         </div>
       </div>
 
-      {filteredAndSortedPeople.length === 0 ? (
+      {filterLoading ? (
+        <div className="loading">Filtering...</div>
+      ) : filteredAndSortedPeople.length === 0 ? (
         <div className="empty-state">
           <p>No people found matching your search.</p>
         </div>
@@ -311,6 +396,51 @@ export default function PeoplePage() {
             </div>
           )}
         </>
+      )}
+
+      {showFilterModal && (
+        <div className="modal-overlay" onClick={() => setShowFilterModal(false)}>
+          <div className="filter-modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Filter People</h3>
+              <button className="modal-close" onClick={() => setShowFilterModal(false)}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
+              </button>
+            </div>
+            <div className="modal-body">
+              {labelDefinitions.map(label => (
+                <div key={label.name} className="filter-row">
+                  <label className="filter-label" title={label.description}>
+                    {label.name}
+                  </label>
+                  <select
+                    className="filter-select"
+                    value={tempFilters[label.name] || 'any'}
+                    onChange={e => setTempFilters(prev => ({
+                      ...prev,
+                      [label.name]: e.target.value as FilterValue
+                    }))}
+                  >
+                    <option value="any">Any</option>
+                    <option value="true">True</option>
+                    <option value="false">False</option>
+                  </select>
+                </div>
+              ))}
+            </div>
+            <div className="modal-footer">
+              <button className="btn-secondary" onClick={handleResetFilter}>
+                Reset
+              </button>
+              <button className="btn-primary" onClick={handleApplyFilter}>
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

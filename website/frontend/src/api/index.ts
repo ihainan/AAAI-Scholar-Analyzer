@@ -69,3 +69,21 @@ export async function filterScholarsByLabels(
     `/api/conferences/${conferenceId}/scholars/filter?${searchParams.toString()}`
   );
 }
+
+export async function filterPeopleByLabels(
+  conferenceId: string,
+  labelFilters: Record<string, boolean>
+): Promise<any[]> {
+  const filterParts = Object.entries(labelFilters)
+    .map(([name, value]) => `${name}:${value}`)
+    .join(',');
+
+  const searchParams = new URLSearchParams();
+  if (filterParts) {
+    searchParams.set('labels', filterParts);
+  }
+
+  return fetchApi<any[]>(
+    `/api/conferences/${conferenceId}/people/filter?${searchParams.toString()}`
+  );
+}

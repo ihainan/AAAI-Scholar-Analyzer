@@ -596,11 +596,14 @@ def build_scholar_detail(talent: dict, aminer_id: Optional[str], conference_id: 
                 aminer_data = load_json_file(str(aminer_path))
                 aminer_detail = aminer_data.get("detail", {})
 
+                # Name: always use name_zh from AMiner
                 detail.name_zh = aminer_detail.get("name_zh")
-                detail.bio = aminer_detail.get("bio")
-                detail.education = aminer_detail.get("edu")
-                detail.position = aminer_detail.get("position")
-                detail.organizations = aminer_detail.get("orgs")
+
+                # For other fields: prefer Chinese version (_zh), fallback to English
+                detail.bio = aminer_detail.get("bio_zh") or aminer_detail.get("bio")
+                detail.education = aminer_detail.get("edu_zh") or aminer_detail.get("edu")
+                detail.position = aminer_detail.get("position_zh") or aminer_detail.get("position")
+                detail.organizations = aminer_detail.get("orgs_zh") or aminer_detail.get("orgs")
                 detail.honors = aminer_detail.get("honor")
 
                 # Research interests from figure
@@ -860,6 +863,176 @@ def get_labels_config():
         return LabelsConfig(**labels_data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error loading labels config: {e}")
+
+
+@app.get("/api/conferences/{conference_id}/people/filter")
+def filter_people_by_labels(
+    conference_id: str,
+    labels: Optional[str] = Query(None, description="Label filters in format 'name:value,name:value' (e.g., 'Chinese:true,Student:false')"),
+):
+    """
+    Filter people (authors + scholars) by label values.
+    Returns merged data from both authors and scholars where labels match with high confidence.
+    """
+    conference_dir = settings.data_dir / conference_id
+
+    if not conference_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Conference not found: {conference_id}")
+
+    # Parse label filters
+    label_filters: dict[str, bool] = {}
+    if labels:
+        for filter_item in labels.split(","):
+            if ":" in filter_item:
+                name, value = filter_item.split(":", 1)
+                name = name.strip()
+                value = value.strip().lower()
+                if value in ("true", "false"):
+                    label_filters[name] = value == "true"
+
+    # Load scholars data
+    scholars_path = conference_dir / "scholars.json"
+    talents = []
+    if scholars_path.exists():
+        try:
+            scholars_data = load_json_file(str(scholars_path))
+            talents = scholars_data.get("talents", [])
+        except Exception as e:
+            logger.error(f"Error loading scholars data: {e}")
+
+    # Load authors data
+    authors_path = conference_dir / "authors.json"
+    authors = []
+    if authors_path.exists():
+        try:
+            authors_data = load_json_file(str(authors_path))
+            authors = authors_data.get("authors", [])
+        except Exception as e:
+            logger.error(f"Error loading authors data: {e}")
+
+    # Create a set of all unique aminer_ids from both sources
+    all_aminer_ids = set()
+    for talent in talents:
+        if talent.get("aminer_id"):
+            all_aminer_ids.add(talent.get("aminer_id"))
+    for author in authors:
+        if author.get("aminer_id"):
+            all_aminer_ids.add(author.get("aminer_id"))
+
+    # Filter by labels if filters are provided
+    filtered_aminer_ids = set()
+    if label_filters:
+        for aminer_id in all_aminer_ids:
+            # Load enriched data to check labels
+            enriched_path = settings.enriched_scholars_dir / f"{aminer_id}.json"
+            if not enriched_path.exists():
+                continue
+
+            try:
+                enriched_data = load_json_file(str(enriched_path))
+                labels_data = enriched_data.get("labels", {})
+                results = labels_data.get("results", [])
+
+                # Check if all filter conditions are met with medium or high confidence
+                all_match = True
+                for label_name, expected_value in label_filters.items():
+                    found_match = False
+                    for result in results:
+                        if result.get("name") == label_name:
+                            if (result.get("value") == expected_value and
+                                result.get("confidence") in ("high", "medium")):
+                                found_match = True
+                            break
+                    if not found_match:
+                        all_match = False
+                        break
+
+                if all_match:
+                    filtered_aminer_ids.add(aminer_id)
+            except Exception:
+                continue
+    else:
+        # No filters, include all
+        filtered_aminer_ids = all_aminer_ids
+
+    # Build merged result with filtered aminer_ids
+    people_map = {}
+
+    # Add scholars first
+    for talent in talents:
+        aminer_id = talent.get("aminer_id")
+        if aminer_id and aminer_id in filtered_aminer_ids:
+            photo_url = get_scholar_photo(aminer_id)
+
+            # Try to get Chinese name from AMiner data
+            name_zh = None
+            aminer_path = settings.aminer_scholars_dir / f"{aminer_id}.json"
+            if aminer_path.exists():
+                try:
+                    aminer_data = load_json_file(str(aminer_path))
+                    name_zh = aminer_data.get("detail", {}).get("name_zh")
+                except Exception:
+                    pass
+
+            people_map[aminer_id] = {
+                "name": talent.get("name", "Unknown"),
+                "name_zh": name_zh,
+                "affiliation": talent.get("affiliation"),
+                "roles": talent.get("roles", []),
+                "aminer_id": aminer_id,
+                "photo_url": photo_url,
+                "description": talent.get("description"),
+            }
+
+    # Merge with authors (add metrics)
+    for author in authors:
+        aminer_id = author.get("aminer_id")
+        if aminer_id and aminer_id in filtered_aminer_ids:
+            if aminer_id in people_map:
+                # Merge data
+                existing = people_map[aminer_id]
+                people_map[aminer_id] = {
+                    **existing,
+                    "paper_count": author.get("paper_count"),
+                    "h_index": author.get("h_index"),
+                    "n_citation": author.get("n_citation"),
+                    "n_pubs": author.get("n_pubs"),
+                    "organization": author.get("organization"),
+                    "organization_zh": author.get("organization_zh"),
+                    "name_zh": existing.get("name_zh") or author.get("name_zh"),
+                }
+            else:
+                # Add new author
+                photo_url = get_scholar_photo(aminer_id)
+
+                # Try to get Chinese name from AMiner data
+                name_zh = author.get("name_zh")
+                if not name_zh and aminer_id:
+                    aminer_path = settings.aminer_scholars_dir / f"{aminer_id}.json"
+                    if aminer_path.exists():
+                        try:
+                            aminer_data = load_json_file(str(aminer_path))
+                            name_zh = aminer_data.get("detail", {}).get("name_zh")
+                        except Exception:
+                            pass
+
+                people_map[aminer_id] = {
+                    "name": author.get("name", "Unknown"),
+                    "name_zh": name_zh,
+                    "affiliation": author.get("organization"),
+                    "roles": [],
+                    "aminer_id": aminer_id,
+                    "photo_url": photo_url,
+                    "description": None,
+                    "paper_count": author.get("paper_count"),
+                    "h_index": author.get("h_index"),
+                    "n_citation": author.get("n_citation"),
+                    "n_pubs": author.get("n_pubs"),
+                    "organization": author.get("organization"),
+                    "organization_zh": author.get("organization_zh"),
+                }
+
+    return list(people_map.values())
 
 
 @app.get("/api/conferences/{conference_id}/scholars/filter", response_model=list[ScholarBasic])
