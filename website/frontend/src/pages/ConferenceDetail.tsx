@@ -126,8 +126,11 @@ export default function ConferenceDetail() {
           throw new Error('Conference not found');
         }
 
+        // Filter scholars to only include those with valid aminer_id (not "failed")
+        const scholarsWithAminerId = scholarsData.filter(s => s.aminer_id && s.aminer_id !== 'failed');
+
         setConference(conf);
-        setScholars(scholarsData);
+        setScholars(scholarsWithAminerId);
         setLabelDefinitions(labelsData.labels);
 
         // Initialize filters with label names
@@ -147,8 +150,8 @@ export default function ConferenceDetail() {
 
         setTempFilters(initialFilters);
 
-        // Apply initial filters with the freshly loaded scholars
-        await applyFilters(initialFilters, scholarsData);
+        // Apply initial filters with the freshly loaded scholars (with aminer_id only)
+        await applyFilters(initialFilters, scholarsWithAminerId);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load data');
       } finally {

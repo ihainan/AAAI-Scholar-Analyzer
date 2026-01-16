@@ -177,6 +177,14 @@ export default function PeoplePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conferenceId]);
 
+  // Update page title when conference data is loaded
+  useEffect(() => {
+    if (conference) {
+      const conferenceName = conference.shortName || conference.name;
+      document.title = `People - ${conferenceName}`;
+    }
+  }, [conference]);
+
   // Update URL when search/sort changes
   useEffect(() => {
     const params = new URLSearchParams();

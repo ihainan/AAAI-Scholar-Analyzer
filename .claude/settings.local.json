@@ -22,7 +22,9 @@
       "Bash(jq:*)",
       "Bash(xargs cat:*)",
       "WebFetch(domain:ai.baidu.com)",
-      "WebFetch(domain:help.aliyun.com)"
+      "WebFetch(domain:help.aliyun.com)",
+      "Bash(ls:*)",
+      "Bash(uv run python:*)"
     ]
   }
 }

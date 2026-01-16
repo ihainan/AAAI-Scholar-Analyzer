@@ -3,7 +3,7 @@
 Compress oversized avatar images in the avatars directory.
 
 This script scans all JPG/PNG images in data/aminer/avatars/ and compresses
-any files larger than 200KB by reducing quality while maintaining the original
+any files larger than 1000KB by reducing quality while maintaining the original
 format. The compressed images overwrite the original files.
 
 Usage:
@@ -37,7 +37,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 AVATAR_DIR = PROJECT_ROOT / "data" / "aminer" / "avatars"
 
 # Default settings
-DEFAULT_MAX_SIZE_KB = 200
+DEFAULT_MAX_SIZE_KB = 1000
 DEFAULT_JPG_QUALITY = 85
 DEFAULT_PNG_QUALITY = 80
 MIN_QUALITY = 50  # Don't go below this to maintain reasonable image quality

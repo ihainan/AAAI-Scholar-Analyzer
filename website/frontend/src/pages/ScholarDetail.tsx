@@ -88,6 +88,18 @@ export default function ScholarDetail() {
     fetchData();
   }, [conferenceId, searchParams]);
 
+  // Update page title when scholar and conference data are loaded
+  useEffect(() => {
+    if (scholar && conference) {
+      const scholarName = formatScholarName(scholar.name, scholar.name_zh);
+      const conferenceName = conference.shortName || conference.name;
+      document.title = `${scholarName} - ${conferenceName}`;
+    } else if (scholar) {
+      const scholarName = formatScholarName(scholar.name, scholar.name_zh);
+      document.title = `${scholarName} - Scholar Details`;
+    }
+  }, [scholar, conference]);
+
   if (loading) {
     return (
       <div className="scholar-detail-page">

@@ -10,6 +10,8 @@ export default function ConferenceList() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    document.title = 'Academic Conferences';
+
     async function fetchConferences() {
       try {
         const data = await getConferences();

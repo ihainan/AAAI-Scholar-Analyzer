@@ -1,156 +1,115 @@
 #!/usr/bin/env python3
 """
-Extract authors from papers.json and enrich with AMiner data.
+Enrich scholars with AMiner data from scholars.json or authors.json.
 
-This script reads papers.json, extracts authors that have AMiner IDs from the
-cached paper details, fetches detailed scholar data via data-proxy API, and
-generates an authors.json file.
+This script reads a JSON file containing scholar information (scholars.json or
+authors.json), fetches detailed scholar data via data-proxy API, and optionally
+generates an enriched output file.
 
-Only authors that have AMiner IDs in the paper details are processed. Authors
-without AMiner IDs are skipped.
+The script supports two input formats:
+- scholars.json: expects top-level key 'talents' with items containing 'aminer_id'
+- authors.json: expects top-level key 'authors' with items containing 'aminer_id'
 
 The script reuses existing scholar cache in data/aminer/scholars/ and
 data/enriched/scholars/ to avoid redundant API calls.
 
 Usage:
-    python enrich_authors_aminer.py <papers_json_path> [options]
+    python enrich_scholars_aminer.py [options]
 
 Example:
-    # Basic usage with environment variables for credentials
+    # Basic usage with default file (authors.json) and environment variables for credentials
     export AMINER_AUTH="Bearer xxx"
     export AMINER_SIGNATURE="xxx"
     export AMINER_TIMESTAMP="xxx"
-    python enrich_authors_aminer.py ../../data/aaai-26/papers.json
+    python enrich_scholars_aminer.py
+
+    # Specify a different JSON file
+    python enrich_scholars_aminer.py --json-file ../../data/aaai-26/scholars.json
 
     # With command line credentials
-    python enrich_authors_aminer.py ../../data/aaai-26/papers.json \
+    python enrich_scholars_aminer.py --json-file ../../data/aaai-26/authors.json \
         --authorization "Bearer xxx" \
         --signature "xxx" \
         --timestamp "xxx"
 
-    # Force refresh all authors (ignore cache)
-    python enrich_authors_aminer.py ../../data/aaai-26/papers.json --force
+    # Force refresh all scholars (ignore cache)
+    python enrich_scholars_aminer.py --json-file ../../data/aaai-26/scholars.json --force
 
-    # Update existing authors (merge with cache, preserve fields like email)
-    python enrich_authors_aminer.py ../../data/aaai-26/papers.json --update-existing
+    # Update existing scholars (merge with cache, preserve fields like email)
+    python enrich_scholars_aminer.py --json-file ../../data/aaai-26/scholars.json --update-existing
+
+    # Process only specific AMiner IDs
+    python enrich_scholars_aminer.py --ids 53f49b5ddabfaebbd777bc95 5608b82645cedb3396d4ba82
 
     # Custom output path
-    python enrich_authors_aminer.py ../../data/aaai-26/papers.json -o ../../data/aaai-26/authors.json
+    python enrich_scholars_aminer.py --json-file ../../data/aaai-26/scholars.json \
+        -o ../../data/aaai-26/scholars_enriched.json
 """
 
 import argparse
-import os
 import sys
 import time
-from collections import defaultdict
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-import requests
-
-# Add parent directory to path for common_utils and sibling directory for utils
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from common_utils import (
-    Colors,
-    get_project_root,
-    load_json_file,
-    save_json_file,
-)
-
-# Add scholars directory to path for shared utilities
-sys.path.insert(0, str(Path(__file__).parent.parent / "scholars"))
+# Add current directory to path for aminer_scholar_utils
+sys.path.insert(0, str(Path(__file__).parent))
 from aminer_scholar_utils import (
     DEFAULT_API_BASE_URL,
-    get_api_credentials as get_api_credentials_from_env,
+    get_api_credentials,
     process_single_scholar,
     print_processing_summary,
 )
 
+# Add parent directory to path for common_utils
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from common_utils import Colors, get_project_root, load_json_file, save_json_file
+
+
+# Paths
+PROJECT_ROOT = Path(__file__).parent.parent.parent
+AUTHORS_FILE = PROJECT_ROOT / "data" / "aaai-26" / "authors.json"
+
 # Data source identifier
-DATA_SOURCE = "papers_enrichment_v1"
+DATA_SOURCE = "scholars_enrichment_v1"
 
 
-# Use get_api_credentials from aminer_scholar_utils (imported as get_api_credentials_from_env)
-
-
-# load_cached_scholar_data is now available from aminer_scholar_utils via process_single_scholar
-
-
-# fetch_scholar_from_api is now available from aminer_scholar_utils via process_single_scholar
-
-
-# convert_api_to_aminer_format is now available from aminer_scholar_utils via process_single_scholar
-
-
-# convert_api_to_enriched_format is now available from aminer_scholar_utils via process_single_scholar
-
-
-def extract_authors_from_papers(
-    papers_json_path: Path,
-    papers_cache_dir: Path
-) -> dict[str, dict]:
+def load_scholars_from_json(json_path: Path) -> tuple[list[dict], str]:
     """
-    Extract authors with AMiner IDs from papers.
+    Load scholars from JSON file.
+
+    Supports two formats:
+    - scholars.json: top-level key 'talents'
+    - authors.json: top-level key 'authors'
 
     Args:
-        papers_json_path: Path to papers.json
-        papers_cache_dir: Directory with cached paper details
+        json_path: Path to the JSON file
 
     Returns:
-        Dictionary mapping aminer_id to author info (name and paper_ids)
+        Tuple of (scholars_list, key_name)
+        key_name is either "talents" or "authors"
     """
-    print(f"Loading papers.json: {papers_json_path}")
-    papers_data = load_json_file(papers_json_path)
-    papers = papers_data.get("papers", [])
-    print(f"Found {len(papers)} papers in the file\n")
+    print(f"Loading scholars from: {json_path}")
+    data = load_json_file(json_path)
 
-    authors_map = defaultdict(lambda: {"name": "", "paper_ids": []})
-    papers_with_cache = 0
-    papers_without_cache = 0
-    total_authors_found = 0
+    # Determine which format we're dealing with
+    if "talents" in data:
+        scholars = data["talents"]
+        key_name = "talents"
+        print(f"Found {len(scholars)} scholars in 'talents' field (scholars.json format)\n")
+    elif "authors" in data:
+        scholars = data["authors"]
+        key_name = "authors"
+        print(f"Found {len(scholars)} scholars in 'authors' field (authors.json format)\n")
+    else:
+        print(f"{Colors.RED}Error: JSON file must contain 'talents' or 'authors' key{Colors.ENDC}")
+        sys.exit(1)
 
-    for idx, paper in enumerate(papers, 1):
-        paper_id = paper.get("paper_id", "Unknown")
-        aminer_paper_id = paper.get("aminer_paper_id")
-
-        if not aminer_paper_id:
-            continue
-
-        # Load paper details from cache
-        paper_cache_file = papers_cache_dir / f"{aminer_paper_id}.json"
-        if not paper_cache_file.exists():
-            papers_without_cache += 1
-            continue
-
-        papers_with_cache += 1
-        paper_data = load_json_file(paper_cache_file)
-        authors = paper_data.get("detail", {}).get("authors", [])
-
-        # Extract authors with AMiner IDs
-        for author in authors:
-            author_id = author.get("id")
-            author_name = author.get("name", "")
-
-            if author_id:  # Only process authors with AMiner ID
-                if not authors_map[author_id]["name"]:
-                    authors_map[author_id]["name"] = author_name
-                    total_authors_found += 1
-                authors_map[author_id]["paper_ids"].append(paper_id)
-
-        if idx % 100 == 0:
-            print(f"Processed {idx}/{len(papers)} papers, found {total_authors_found} unique authors with AMiner IDs")
-
-    print(f"\nExtraction complete:")
-    print(f"  Papers with cache: {papers_with_cache}")
-    print(f"  Papers without cache: {papers_without_cache}")
-    print(f"  Unique authors with AMiner IDs: {len(authors_map)}\n")
-
-    return dict(authors_map)
+    return scholars, key_name
 
 
-def process_authors(
-    authors_map: dict[str, dict],
+def process_scholars(
+    scholars: list[dict],
     aminer_dir: Path,
     enriched_dir: Path,
     api_base_url: str,
@@ -158,16 +117,16 @@ def process_authors(
     signature: str,
     timestamp: str,
     force: bool = False,
-    delay: float = 2.0,
+    delay: float = 5.0,
     force_refresh: bool = False,
     update_existing: bool = False,
     verbose: bool = False
 ) -> tuple[list[dict], dict]:
     """
-    Process all authors and enrich with AMiner data.
+    Process all scholars and enrich with AMiner data.
 
     Args:
-        authors_map: Dictionary mapping aminer_id to author info
+        scholars: List of scholar dictionaries
         aminer_dir: Directory for AMiner cache files
         enriched_dir: Directory for enriched data files
         api_base_url: Base URL of the API
@@ -181,15 +140,11 @@ def process_authors(
         verbose: Whether to print detailed progress
 
     Returns:
-        Tuple of (authors_list, statistics)
+        Tuple of (enriched_scholars_list, statistics)
     """
-    # Ensure output directories exist
-    aminer_dir.mkdir(parents=True, exist_ok=True)
-    enriched_dir.mkdir(parents=True, exist_ok=True)
-
     # Track statistics
     stats = {
-        "total": len(authors_map),
+        "total": len(scholars),
         "processed": 0,
         "skipped": 0,
         "cache_hit": 0,
@@ -200,22 +155,24 @@ def process_authors(
         "failed_ids": []
     }
 
-    authors_list = []
+    enriched_scholars = []
 
-    for idx, (aminer_id, author_info) in enumerate(authors_map.items(), 1):
-        name = author_info["name"]
-        paper_ids = author_info["paper_ids"]
+    for idx, scholar in enumerate(scholars, 1):
+        aminer_id = scholar.get("aminer_id")
+        name = scholar.get("name", "Unknown")
 
-        # Check for invalid AMiner IDs (defensive programming)
+        # Check for invalid or missing AMiner IDs
         if not aminer_id or aminer_id == "failed" or aminer_id.strip() == "":
             reason = "no AMiner ID" if not aminer_id or aminer_id.strip() == "" else "invalid AMiner ID"
             print(f"[{idx}/{stats['total']}] {Colors.YELLOW}Skipped{Colors.ENDC} {name} ({reason})")
             stats["skipped"] += 1
+            # Keep original scholar data without enrichment
+            enriched_scholars.append(scholar.copy())
             continue
 
         print(f"[{idx}/{stats['total']}] {Colors.CYAN}Processing{Colors.ENDC} {name} ({aminer_id})")
 
-        # Process the scholar using shared utility
+        # Process the scholar
         aminer_data, enriched_data, status, error_msg = process_single_scholar(
             aminer_id=aminer_id,
             aminer_dir=aminer_dir,
@@ -234,67 +191,71 @@ def process_authors(
         # Update statistics
         if status == "cache_hit":
             stats["cache_hit"] += 1
-            print(f"       Papers: {len(paper_ids)} | {Colors.DIM}Cache hit{Colors.ENDC}")
+            print(f"       {Colors.DIM}Cache hit{Colors.ENDC}")
         elif status == "api_success":
             stats["api_call"] += 1
-            print(f"       Papers: {len(paper_ids)} | {Colors.GREEN}API success{Colors.ENDC}")
+            print(f"       {Colors.GREEN}[SUCCESS]{Colors.ENDC}")
         elif status == "api_updated":
             stats["api_call"] += 1
             stats["api_updated"] += 1
-            print(f"       Papers: {len(paper_ids)} | {Colors.CYAN}API updated{Colors.ENDC}")
+            print(f"       {Colors.CYAN}[UPDATED]{Colors.ENDC}")
         elif status == "api_no_change":
             stats["api_call"] += 1
-            print(f"       Papers: {len(paper_ids)} | {Colors.DIM}No changes{Colors.ENDC}")
+            print(f"       {Colors.DIM}No changes{Colors.ENDC}")
         elif status == "api_failed":
             stats["api_call"] += 1
             stats["failed"] += 1
             stats["failed_ids"].append(aminer_id)
             stats["processed"] += 1
             error_display = f": {error_msg}" if error_msg else ""
-            print(f"       Papers: {len(paper_ids)} | {Colors.RED}[FAILED]{Colors.ENDC} API call failed{error_display}")
+            print(f"       {Colors.RED}[FAILED]{Colors.ENDC} API call failed{error_display}")
+            # Keep original scholar data on failure
+            enriched_scholars.append(scholar.copy())
             continue
 
-        # Build author entry for authors.json
-        detail = aminer_data.get("detail", {})
+        # Build enriched scholar entry
+        detail = aminer_data.get("detail", {}) if aminer_data else {}
         enriched = enriched_data if isinstance(enriched_data, dict) else {}
 
-        # Extract indices from enriched data (nested under "indices" key)
-        indices = enriched.get("indices", {})
+        # Start with original scholar data
+        enriched_scholar = scholar.copy()
 
-        author_entry = {
-            "name": name,
-            "normalized_name": name.lower(),
-            "aminer_id": aminer_id,
-            "aminer_name": detail.get("name", name),
-            "aminer_name_zh": detail.get("name_zh", ""),
-            "papers": sorted(paper_ids),
-            "paper_count": len(paper_ids),
-            "h_index": indices.get("hindex"),
-            "n_citation": indices.get("citations"),
-            "n_pubs": indices.get("pubs"),
-            "organization": detail.get("orgs", [""])[0] if detail.get("orgs") else "",
-            "position": detail.get("position", "")
-        }
+        # Add AMiner detail fields
+        if detail:
+            enriched_scholar["aminer_name"] = detail.get("name", name)
+            enriched_scholar["aminer_name_zh"] = detail.get("name_zh", "")
+            enriched_scholar["bio"] = detail.get("bio", "")
+            enriched_scholar["bio_zh"] = detail.get("bio_zh", "")
+            enriched_scholar["edu"] = detail.get("edu", "")
+            enriched_scholar["edu_zh"] = detail.get("edu_zh", "")
+            enriched_scholar["position"] = detail.get("position", "")
+            enriched_scholar["position_zh"] = detail.get("position_zh", "")
+            enriched_scholar["orgs"] = detail.get("orgs", [])
+            enriched_scholar["org_zhs"] = detail.get("org_zhs", [])
+            enriched_scholar["honor"] = detail.get("honor", [])
 
-        authors_list.append(author_entry)
+        # Add enriched fields (indices, etc.)
+        if enriched:
+            indices = enriched.get("indices", {})
+            enriched_scholar["h_index"] = indices.get("hindex")
+            enriched_scholar["n_citation"] = indices.get("citations")
+            enriched_scholar["n_pubs"] = indices.get("pubs")
+            enriched_scholar["email"] = enriched.get("email", "")
+
+        enriched_scholars.append(enriched_scholar)
         stats["success"] += 1
         stats["processed"] += 1
-
-        print(f"       {Colors.GREEN}[SUCCESS]{Colors.ENDC}")
 
         # Rate limiting
         if idx < stats["total"] and delay > 0 and stats["api_call"] > 0:
             time.sleep(delay)
 
-    return authors_list, stats
-
-
-# print_summary is replaced by print_processing_summary from aminer_scholar_utils
+    return enriched_scholars, stats
 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract authors from papers.json and enrich with AMiner data",
+        description="Enrich scholars with AMiner data from scholars.json or authors.json",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
@@ -306,16 +267,17 @@ def main():
     )
 
     parser.add_argument(
-        "papers_json",
+        "--json-file",
         type=str,
-        help="Path to the papers.json file"
+        default=str(AUTHORS_FILE),
+        help=f"JSON file containing scholars (default: {AUTHORS_FILE})"
     )
 
     parser.add_argument(
         "-o", "--output",
         type=str,
         default=None,
-        help="Output path for authors.json (default: same directory as papers.json)"
+        help="Output path for enriched JSON (optional, default: no output file)"
     )
 
     parser.add_argument(
@@ -391,16 +353,15 @@ def main():
     args = parser.parse_args()
 
     # Resolve file path
-    papers_json_path = Path(args.papers_json).resolve()
-    if not papers_json_path.exists():
-        print(f"{Colors.RED}Error: File not found: {papers_json_path}{Colors.ENDC}")
+    json_path = Path(args.json_file).resolve()
+    if not json_path.exists():
+        print(f"{Colors.RED}Error: File not found: {json_path}{Colors.ENDC}")
         sys.exit(1)
 
     # Determine output path
+    output_path = None
     if args.output:
         output_path = Path(args.output).resolve()
-    else:
-        output_path = papers_json_path.parent / "authors.json"
 
     # Get credentials
     authorization = args.authorization
@@ -417,7 +378,7 @@ def main():
 
     # Fall back to environment variables
     if not authorization or not signature or not timestamp:
-        env_auth, env_sig, env_ts = get_api_credentials_from_env()
+        env_auth, env_sig, env_ts = get_api_credentials()
         authorization = authorization or env_auth
         signature = signature or env_sig
         timestamp = timestamp or env_ts
@@ -448,14 +409,15 @@ def main():
     else:
         enriched_dir = project_root / "data" / "enriched" / "scholars"
 
-    papers_cache_dir = project_root / "data" / "aminer" / "papers"
-
     # Print configuration
     print("=" * 60)
-    print(f"{Colors.BOLD}Enrich Authors with AMiner Data{Colors.ENDC}")
+    print(f"{Colors.BOLD}Enrich Scholars with AMiner Data{Colors.ENDC}")
     print("=" * 60)
-    print(f"Papers JSON: {papers_json_path}")
-    print(f"Output: {output_path}")
+    print(f"Input JSON: {json_path}")
+    if output_path:
+        print(f"Output: {output_path}")
+    else:
+        print(f"Output: {Colors.DIM}(no output file){Colors.ENDC}")
     print(f"API URL: {args.api_url}")
     print(f"AMiner directory: {aminer_dir}")
     print(f"Enriched directory: {enriched_dir}")
@@ -464,29 +426,29 @@ def main():
     print(f"Delay: {args.delay}s")
     print()
 
-    # Extract authors from papers
-    authors_map = extract_authors_from_papers(papers_json_path, papers_cache_dir)
+    # Load scholars from JSON
+    scholars, key_name = load_scholars_from_json(json_path)
 
-    if not authors_map:
-        print(f"{Colors.YELLOW}No authors with AMiner IDs found{Colors.ENDC}")
+    if not scholars:
+        print(f"{Colors.YELLOW}No scholars found{Colors.ENDC}")
         sys.exit(0)
 
     # Filter by specific IDs if provided
     if args.ids:
         ids_set = set(args.ids)
-        original_count = len(authors_map)
-        authors_map = {k: v for k, v in authors_map.items() if k in ids_set}
-        print(f"Filtered to {len(authors_map)} authors (from {original_count} total) matching specified IDs")
+        original_count = len(scholars)
+        scholars = [s for s in scholars if s.get("aminer_id") in ids_set]
+        print(f"Filtered to {len(scholars)} scholars (from {original_count} total) matching specified IDs")
         print(f"Specified IDs: {', '.join(args.ids)}")
         print()
 
-        if not authors_map:
-            print(f"{Colors.YELLOW}No matching authors found for the specified IDs{Colors.ENDC}")
+        if not scholars:
+            print(f"{Colors.YELLOW}No matching scholars found for the specified IDs{Colors.ENDC}")
             sys.exit(0)
 
-    # Process authors
-    authors_list, stats = process_authors(
-        authors_map=authors_map,
+    # Process scholars
+    enriched_scholars, stats = process_scholars(
+        scholars=scholars,
         aminer_dir=aminer_dir,
         enriched_dir=enriched_dir,
         api_base_url=args.api_url,
@@ -500,22 +462,21 @@ def main():
         verbose=args.verbose
     )
 
-    # Sort authors by name
-    authors_list.sort(key=lambda x: x["normalized_name"])
+    # Generate output file if requested
+    if output_path:
+        # Load original metadata
+        original_data = load_json_file(json_path)
+        metadata = original_data.get("metadata", {})
 
-    # Generate authors.json
-    output_data = {
-        "metadata": {
-            "total_authors": len(authors_list),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-            "source": str(papers_json_path)
-        },
-        "authors": authors_list
-    }
+        # Build output data with same structure as input
+        output_data = {
+            "metadata": metadata,
+            key_name: enriched_scholars
+        }
 
-    print(f"\n{Colors.CYAN}Saving authors.json...{Colors.ENDC}")
-    save_json_file(output_path, output_data)
-    print(f"{Colors.GREEN}Saved to: {output_path}{Colors.ENDC}")
+        print(f"\n{Colors.CYAN}Saving enriched data...{Colors.ENDC}")
+        save_json_file(output_path, output_data)
+        print(f"{Colors.GREEN}Saved to: {output_path}{Colors.ENDC}")
 
     # Print summary
     print_processing_summary(stats)

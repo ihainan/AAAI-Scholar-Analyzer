@@ -71,44 +71,63 @@ PADDLE_OCR_TOKEN = None
 DASHSCOPE_API_KEY = None
 
 
-def load_sorted_scholar_ids() -> List[tuple[str, int]]:
+def load_sorted_scholar_ids(json_path: Optional[str] = None) -> List[tuple[str, int]]:
     """
-    Load scholar IDs from authors.json, sorted by citation count (high to low).
+    Load scholar IDs from a JSON file, sorted by citation count (high to low).
+
+    Supports two file formats:
+    - authors.json: expects top-level key 'authors' with items containing 'aminer_id' and optional 'n_citation'
+    - scholars.json (AAAI): expects top-level key 'talents' with items containing 'aminer_id' and optional 'n_citation'
+
+    Args:
+        json_path: Optional path to the JSON file. If None, uses AUTHORS_FILE.
 
     Returns:
         List of (aminer_id, n_citation) tuples, sorted by citation count descending
     """
-    if not AUTHORS_FILE.exists():
-        print(f"Error: Authors file not found: {AUTHORS_FILE}")
+    file_path = Path(json_path) if json_path is not None else AUTHORS_FILE
+
+    if not file_path.exists():
+        print(f"Error: Scholars file not found: {file_path}")
         sys.exit(1)
 
     try:
-        with open(AUTHORS_FILE, 'r', encoding='utf-8') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
 
-        authors = data.get('authors', [])
-        if not authors:
-            print("Warning: No authors found in authors.json")
+        # Determine which top-level key to use
+        if isinstance(data, dict) and 'authors' in data:
+            items = data.get('authors', [])
+        elif isinstance(data, dict) and 'talents' in data:
+            items = data.get('talents', [])
+        else:
+            # Fallback: try to read list-like root
+            items = data if isinstance(data, list) else []
+
+        if not items:
+            print(f"Warning: No scholar entries found in {file_path}")
             return []
 
-        # Extract aminer_id and n_citation, sort by citations descending
+        # Extract aminer_id and n_citation, treat missing n_citation as 0
         scholars = []
-        for author in authors:
-            aminer_id = author.get('aminer_id')
-            n_citation = author.get('n_citation')
+        for item in items:
+            aminer_id = item.get('aminer_id') if isinstance(item, dict) else None
+            n_citation = None
+            if isinstance(item, dict):
+                n_citation = item.get('n_citation')
             # Handle None values - treat as 0
             if n_citation is None:
                 n_citation = 0
             if aminer_id:
                 scholars.append((aminer_id, n_citation))
 
-        # Sort by citations (high to low), handle None values as 0
+        # Sort by citations (high to low); stable sort preserves original order for equal counts
         scholars.sort(key=lambda x: x[1] if x[1] is not None else 0, reverse=True)
 
         return scholars
 
     except Exception as e:
-        print(f"Error: Failed to load authors.json: {e}")
+        print(f"Error: Failed to load scholars JSON ({file_path}): {e}")
         sys.exit(1)
 
 
@@ -652,6 +671,11 @@ def main():
         help="Specific AMiner IDs to process (for testing)"
     )
     parser.add_argument(
+        "--json-file",
+        default=str(AUTHORS_FILE),
+        help=f"JSON file containing scholars (default: {AUTHORS_FILE})"
+    )
+    parser.add_argument(
         "--api-url",
         default=DEFAULT_DATA_PROXY_URL,
         help=f"Data-proxy API URL (default: {DEFAULT_DATA_PROXY_URL})"
@@ -754,8 +778,8 @@ def main():
         print(f"Testing with {len(scholars)} specified scholars")
     else:
         # Production mode: all scholars sorted by citations
-        print("Loading scholars from authors.json...")
-        scholars = load_sorted_scholar_ids()
+        print(f"Loading scholars from {args.json_file}...")
+        scholars = load_sorted_scholar_ids(args.json_file)
         print(f"Found {len(scholars)} scholars (sorted by citations, high to low)")
 
     if not scholars:
@@ -765,6 +789,7 @@ def main():
     # Statistics
     stats = {
         "total": len(scholars),
+        "skipped_invalid_id": 0,
         "skipped_has_email": 0,
         "skipped_no_email": 0,
         "skipped_cached": 0,
@@ -785,6 +810,12 @@ def main():
             progress = (i / stats["total"]) * 100
             citation_info = f"(citations: {n_citation})" if n_citation > 0 else ""
             print(f"\n[{i}/{stats['total']} ({progress:.1f}%)] {aminer_id} {citation_info}")
+
+            # Check for invalid AMiner IDs
+            if not aminer_id or aminer_id == "failed" or aminer_id.strip() == "":
+                print(f"  ⊙ Skipped: Invalid AMiner ID")
+                stats["skipped_invalid_id"] += 1
+                continue
 
             # Check if already has email in enriched data
             if has_email_in_enriched(aminer_id):
@@ -912,6 +943,7 @@ def main():
     print("\n" + "=" * 70)
     print("Summary:")
     print(f"  Total scholars:          {stats['total']}")
+    print(f"  Skipped (invalid ID):    {stats['skipped_invalid_id']}")
     print(f"  Skipped (has email):     {stats['skipped_has_email']}")
     print(f"  Skipped (no email):      {stats['skipped_no_email']}")
     print(f"  Skipped (cached):        {stats['skipped_cached']}")
