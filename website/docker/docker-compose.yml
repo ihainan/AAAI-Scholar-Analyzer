@@ -1,3 +1,5 @@
+name: scholar-discussion
+
 services:
   backend:
     container_name: scholar-backend
