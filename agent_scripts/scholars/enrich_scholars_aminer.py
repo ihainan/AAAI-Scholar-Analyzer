@@ -117,7 +117,7 @@ def process_scholars(
     signature: str,
     timestamp: str,
     force: bool = False,
-    delay: float = 5.0,
+    delay: float = 10.0,
     force_refresh: bool = False,
     update_existing: bool = False,
     verbose: bool = False

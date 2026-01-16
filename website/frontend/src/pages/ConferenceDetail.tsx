@@ -311,7 +311,7 @@ export default function ConferenceDetail() {
 
       <section className="scholars-section">
         <div className="scholars-header">
-          <h2>Conference Participants ({scholars.length})</h2>
+          <h2>Conference Participants ({filteredScholars.length})</h2>
           <button
             className={`filter-button ${hasActiveFilters(filters) ? 'active' : ''}`}
             onClick={openFilterModal}
